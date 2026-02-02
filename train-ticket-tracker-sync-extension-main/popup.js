@@ -78,15 +78,11 @@ document.getElementById("syncBtn").addEventListener("click", async () => {
                 } catch (e) {
                     // ignore
                 }
-
-                // Redirect or reload
-                if (window.location.pathname === "/login" || window.location.pathname === "/login-advanced") {
-                    window.location.href = "/";
-                } else if (window.location.pathname === "/") {
-                    window.location.reload();
-                }
             },
         });
+
+        // Force reload the tracker tab with cache bypass
+        await chrome.tabs.reload(trackerTab.id, { bypassCache: true });
 
         statusEl.textContent = "Account synced successfully!";
     } catch (err) {
