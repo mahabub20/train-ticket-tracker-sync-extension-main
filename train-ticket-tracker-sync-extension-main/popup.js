@@ -50,46 +50,36 @@ document.getElementById("syncBtn").addEventListener("click", async () => {
             return;
         }
 
+        // Get token from extension storage first (Synchronous relative to injection)
+        const result = await chrome.storage.local.get([
+            "bdTrainToken",
+            "bdTrainSSDK",
+            "bdTrainUUDID",
+        ]);
+
+        const token = result.bdTrainToken;
+        const ssdk = result.bdTrainSSDK;
+        const uudid = result.bdTrainUUDID;
+
+        if (!token) {
+            statusEl.textContent = "Sync failed, log in to eticket first.";
+            return;
+        }
+
+        // Inject and Reload in one go
         await chrome.scripting.executeScript({
             target: { tabId: trackerTab.id },
-            func: () => {
-                chrome.storage.local.get([
-                    "bdTrainToken",
-                    "bdTrainSSDK",
-                    "bdTrainUUDID",
-                ], (result) => {
-                    const token = result.bdTrainToken;
-                    const ssdk = result.bdTrainSSDK;
-                    const uudid = result.bdTrainUUDID;
+            args: [token, ssdk, uudid],
+            func: (token, ssdk, uudid) => {
+                try {
+                    localStorage.setItem("token", token);
+                    if (ssdk) localStorage.setItem("ssdk", ssdk);
+                    if (uudid) localStorage.setItem("uudid", uudid);
+                } catch (e) {
+                    // ignore
+                }
 
-                    if (token) {
-                        // Set values in the page's localStorage
-                        try {
-                            localStorage.setItem("token", token);
-                            if (ssdk) localStorage.setItem("ssdk", ssdk);
-                            if (uudid) localStorage.setItem("uudid", uudid);
-                        } catch (e) {
-                            // ignore quota or access errors
-                        }
-                    } else {
-                        chrome.runtime.sendMessage({ type: "NO_TOKEN_FOUND" });
-                    }
-                });
-            },
-        });
-
-        chrome.runtime.onMessage.addListener((msg) => {
-            if (msg.type === "NO_TOKEN_FOUND") {
-                statusEl.textContent = "Sync failed, log in to eticket first.";
-            }
-        });
-
-        statusEl.textContent = "Account synced successfully!";
-
-        // Redirect or reload to homepage
-        chrome.scripting.executeScript({
-            target: { tabId: trackerTab.id },
-            func: () => {
+                // Redirect or reload
                 if (window.location.pathname === "/login" || window.location.pathname === "/login-advanced") {
                     window.location.href = "/";
                 } else if (window.location.pathname === "/") {
@@ -97,7 +87,10 @@ document.getElementById("syncBtn").addEventListener("click", async () => {
                 }
             },
         });
+
+        statusEl.textContent = "Account synced successfully!";
     } catch (err) {
         statusEl.textContent = "Sync failed.";
+        console.error(err);
     }
 });
