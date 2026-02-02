@@ -31,7 +31,7 @@ document.getElementById("syncBtn").addEventListener("click", async () => {
 
         // STEP 2: Inject token into tracker app
         const [trackerTab] = await chrome.tabs.query({
-            url: "*://YOUR_VERCEL_APP_URL/*",
+            url: "*://train-ticket-notifier.vercel.app/*",
         });
 
         if (!trackerTab) {
@@ -42,7 +42,7 @@ document.getElementById("syncBtn").addEventListener("click", async () => {
             btn.textContent = "Visit tracker";
             btn.onclick = () => {
                 chrome.tabs.create({
-                    url: "https://YOUR_VERCEL_APP_URL/",
+                    url: "https://train-ticket-notifier.vercel.app/",
                 });
             };
             statusEl.appendChild(msg);
