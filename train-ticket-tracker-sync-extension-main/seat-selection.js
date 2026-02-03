@@ -6,20 +6,28 @@
 
     console.log('[Train Ticket Auto-Seat] Seat selection page detected');
 
-    // Wait for page to fully load with coaches
-    function waitForCoaches() {
+    // Wait for page to fully load with seats
+    function waitForSeats() {
         return new Promise((resolve) => {
             let attempts = 0;
-            const maxAttempts = 40; // 20 seconds max
+            const maxAttempts = 60; // 30 seconds max
 
             const checkInterval = setInterval(() => {
-                // Look for coach dropdown or seat elements
-                const coachDropdown = document.querySelector('select, [class*="select"], [class*="dropdown"]');
-                const seatElements = document.querySelectorAll('[class*="seat"], [class*="Seat"], button[class*="CHA"], div[class*="CHA"]');
+                // Look for seat elements - they have text like CHA-1, CHA-2, etc.
+                const allElements = document.querySelectorAll('div, span, button');
+                let seatCount = 0;
 
-                if (coachDropdown || seatElements.length > 0) {
+                for (const el of allElements) {
+                    if (el.textContent.match(/^CHA-\d+$/) && el.children.length === 0) {
+                        seatCount++;
+                    }
+                }
+
+                console.log('[Train Ticket Auto-Seat] Found', seatCount, 'seat elements');
+
+                if (seatCount > 10) {
                     clearInterval(checkInterval);
-                    setTimeout(() => resolve(true), 1500); // Wait for full render
+                    setTimeout(() => resolve(true), 2000); // Wait for full render
                 } else {
                     attempts++;
                     if (attempts >= maxAttempts) {
@@ -29,124 +37,6 @@
                 }
             }, 500);
         });
-    }
-
-    // Get all coach options
-    function getCoachOptions() {
-        // Find the coach dropdown/select
-        const selects = document.querySelectorAll('select');
-        for (const select of selects) {
-            const options = select.querySelectorAll('option');
-            if (options.length > 0) {
-                // Check if this looks like a coach selector
-                const text = select.textContent || '';
-                if (text.includes('CHA') || text.includes('Seat') || text.includes('Coach')) {
-                    return { select, options: Array.from(options) };
-                }
-            }
-        }
-
-        // Also check for MUI Select or custom dropdowns
-        const muiSelects = document.querySelectorAll('[class*="MuiSelect"], [class*="select"]');
-        for (const select of muiSelects) {
-            if (select.textContent.includes('CHA') || select.textContent.includes('Seat')) {
-                return { select, type: 'mui' };
-            }
-        }
-
-        return null;
-    }
-
-    // Find available seats in current view
-    function findAvailableSeats() {
-        const availableSeats = [];
-
-        // Look for seat buttons/elements that are available (not booked/in-progress)
-        // Available seats are typically white/gray, not orange/red
-        const allButtons = document.querySelectorAll('button, div[role="button"], span[class*="seat"]');
-
-        for (const btn of allButtons) {
-            const text = btn.textContent.trim();
-            const className = btn.className || '';
-            const style = window.getComputedStyle(btn);
-            const bgColor = style.backgroundColor;
-
-            // Check if it looks like a seat (CHA-1, CHA-2, etc. or just numbers)
-            if (text.match(/^(CHA-?\d+|\d+|[A-Z]-?\d+)$/i)) {
-                // Check if it's available (not in progress, not booked)
-                // Available seats are usually gray/white with specific styling
-                const isBooked = className.includes('booked') ||
-                    className.includes('Booked') ||
-                    className.includes('progress') ||
-                    className.includes('Progress') ||
-                    bgColor.includes('rgb(255, 152') || // Orange
-                    bgColor.includes('rgb(244, 67'); // Red
-
-                const isAvailable = className.includes('available') ||
-                    className.includes('Available') ||
-                    (!isBooked && (bgColor.includes('rgb(255, 255, 255)') || // White
-                        bgColor.includes('rgb(245') || // Light gray
-                        bgColor.includes('rgb(238') || // Light gray
-                        bgColor.includes('rgb(224'))); // Light gray
-
-                if (!isBooked) {
-                    availableSeats.push({
-                        element: btn,
-                        text: text,
-                        isAvailable: isAvailable
-                    });
-                }
-            }
-        }
-
-        // Also look for seats by their visual appearance
-        const seatDivs = document.querySelectorAll('div, button');
-        for (const div of seatDivs) {
-            const text = div.textContent.trim();
-            if (text.match(/^CHA-\d+$/)) {
-                const bgColor = window.getComputedStyle(div).backgroundColor;
-                // Gray/white colors indicate available
-                if (bgColor.includes('rgb(158') || bgColor.includes('rgb(189') || bgColor.includes('rgb(224')) {
-                    if (!availableSeats.find(s => s.text === text)) {
-                        availableSeats.push({
-                            element: div,
-                            text: text,
-                            isAvailable: true
-                        });
-                    }
-                }
-            }
-        }
-
-        return availableSeats;
-    }
-
-    // Select a coach from dropdown
-    async function selectCoach(coachInfo, coachIndex) {
-        if (!coachInfo) return false;
-
-        if (coachInfo.type === 'mui') {
-            // Click to open dropdown
-            coachInfo.select.click();
-            await new Promise(r => setTimeout(r, 500));
-
-            // Find and click the option
-            const menuItems = document.querySelectorAll('[role="option"], [class*="MenuItem"], li');
-            if (menuItems[coachIndex]) {
-                menuItems[coachIndex].click();
-                await new Promise(r => setTimeout(r, 1000));
-                return true;
-            }
-        } else if (coachInfo.select && coachInfo.options) {
-            // Regular select element
-            if (coachInfo.options[coachIndex]) {
-                coachInfo.select.value = coachInfo.options[coachIndex].value;
-                coachInfo.select.dispatchEvent(new Event('change', { bubbles: true }));
-                await new Promise(r => setTimeout(r, 1000));
-                return true;
-            }
-        }
-        return false;
     }
 
     // Show notification
@@ -204,118 +94,190 @@
         document.body.appendChild(notification);
 
         // Remove after appropriate time
-        const duration = type === 'error' ? 8000 : 5000;
+        const duration = type === 'error' ? 10000 : 5000;
         setTimeout(() => {
             notification.style.animation = 'slideIn 0.3s ease reverse';
             setTimeout(() => notification.remove(), 300);
         }, duration);
     }
 
-    // Main function to find and select seat
-    async function autoSelectSeat() {
-        console.log('[Train Ticket Auto-Seat] Starting seat search...');
+    // RGB to check if color is gray (available seat)
+    function isGrayColor(rgbString) {
+        // Gray colors have similar R, G, B values
+        // Available seats in the screenshot appear gray: rgb(158, 158, 158) or similar
+        const match = rgbString.match(/rgb\s*\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/);
+        if (!match) return false;
 
-        const pageReady = await waitForCoaches();
-        if (!pageReady) {
-            showNotification('Page loading issue. Please select manually.', 'error');
-            return;
-        }
+        const r = parseInt(match[1]);
+        const g = parseInt(match[2]);
+        const b = parseInt(match[3]);
 
-        showNotification('Searching for available seats...', 'info');
+        // Check if it's a gray color (R, G, B are close to each other) and in the gray range
+        const isGray = Math.abs(r - g) < 20 && Math.abs(g - b) < 20 && Math.abs(r - b) < 20;
+        const isInGrayRange = r >= 100 && r <= 200 && g >= 100 && g <= 200 && b >= 100 && b <= 200;
 
-        // Get coach dropdown info
-        const coachInfo = getCoachOptions();
-        const totalCoaches = coachInfo?.options?.length || 20; // Default to 20 coaches
+        return isGray && isInGrayRange;
+    }
 
-        let seatFound = false;
-        let checkedCoaches = 0;
+    // Check if color is orange (booked/in progress seat)
+    function isOrangeColor(rgbString) {
+        const match = rgbString.match(/rgb\s*\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/);
+        if (!match) return false;
 
-        // First check current view for available seats
-        let availableSeats = findAvailableSeats();
-        console.log('[Train Ticket Auto-Seat] Found', availableSeats.length, 'potential seats in current view');
+        const r = parseInt(match[1]);
+        const g = parseInt(match[2]);
+        const b = parseInt(match[3]);
 
-        // Look for seats that appear available (gray background)
-        for (const seat of availableSeats) {
-            if (seat.isAvailable) {
-                console.log('[Train Ticket Auto-Seat] Found available seat:', seat.text);
-                seat.element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                await new Promise(r => setTimeout(r, 300));
+        // Orange: high red, medium green, low blue
+        return r > 200 && g > 100 && g < 200 && b < 100;
+    }
 
-                // Highlight and click
-                seat.element.style.boxShadow = '0 0 20px 5px #27ae60';
-                seat.element.style.transition = 'box-shadow 0.3s ease';
+    // Find all available seats
+    function findAvailableSeats() {
+        const availableSeats = [];
+        const allElements = document.querySelectorAll('div, span, button');
 
-                await new Promise(r => setTimeout(r, 200));
-                seat.element.click();
+        for (const el of allElements) {
+            const text = el.textContent.trim();
 
-                seatFound = true;
-                showNotification(`✓ Selected seat: ${seat.text}`, 'success');
-                return;
-            }
-        }
+            // Check if this is a seat element (CHA-1, CHA-2, etc.)
+            if (text.match(/^CHA-\d+$/) && el.children.length === 0) {
+                const bgColor = window.getComputedStyle(el).backgroundColor;
+                const parentBgColor = el.parentElement ? window.getComputedStyle(el.parentElement).backgroundColor : '';
 
-        // If no available seat in current view, try other coaches
-        if (coachInfo && coachInfo.options) {
-            for (let i = 0; i < coachInfo.options.length && !seatFound; i++) {
-                checkedCoaches++;
-                console.log('[Train Ticket Auto-Seat] Checking coach', i + 1, 'of', coachInfo.options.length);
+                console.log('[Train Ticket Auto-Seat] Seat', text, '- bg:', bgColor);
 
-                const selected = await selectCoach(coachInfo, i);
-                if (selected) {
-                    await new Promise(r => setTimeout(r, 800));
+                // Check if it's an available (gray) seat
+                if (isGrayColor(bgColor) || isGrayColor(parentBgColor)) {
+                    availableSeats.push({
+                        element: el,
+                        text: text,
+                        seatNum: parseInt(text.replace('CHA-', ''))
+                    });
+                    console.log('[Train Ticket Auto-Seat] ✓ Available seat found:', text);
+                } else if (!isOrangeColor(bgColor) && !isOrangeColor(parentBgColor)) {
+                    // If not orange, might still be available - check more
+                    // Sometimes available seats have white or light background
+                    const match = bgColor.match(/rgb\s*\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/);
+                    if (match) {
+                        const r = parseInt(match[1]);
+                        const g = parseInt(match[2]);
+                        const b = parseInt(match[3]);
 
-                    const seats = findAvailableSeats();
-                    for (const seat of seats) {
-                        if (seat.isAvailable) {
-                            console.log('[Train Ticket Auto-Seat] Found available seat in coach', i + 1, ':', seat.text);
-                            seat.element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                            await new Promise(r => setTimeout(r, 300));
-
-                            seat.element.style.boxShadow = '0 0 20px 5px #27ae60';
-                            seat.element.click();
-
-                            seatFound = true;
-                            showNotification(`✓ Found and selected seat: ${seat.text}`, 'success');
-                            return;
+                        // Light gray or white-ish colors
+                        if (r >= 150 && g >= 150 && b >= 150 && r < 230 && g < 230) {
+                            availableSeats.push({
+                                element: el,
+                                text: text,
+                                seatNum: parseInt(text.replace('CHA-', ''))
+                            });
+                            console.log('[Train Ticket Auto-Seat] ✓ Potentially available seat:', text);
                         }
                     }
                 }
             }
         }
 
-        // If still no seat found, try clicking on gray/available-looking seats directly
-        if (!seatFound) {
-            const allDivs = document.querySelectorAll('div, button, span');
-            for (const div of allDivs) {
-                const text = div.textContent.trim();
-                if (text.match(/^CHA-\d+$/) && div.children.length === 0) {
-                    const bgColor = window.getComputedStyle(div).backgroundColor;
-                    // Gray colors (available seats)
-                    if (bgColor.includes('158, 158, 158') || bgColor.includes('189, 189, 189') ||
-                        bgColor.includes('224, 224, 224') || bgColor.includes('rgb(158') ||
-                        bgColor.includes('rgb(189') || bgColor.includes('rgb(224')) {
-                        console.log('[Train Ticket Auto-Seat] Clicking gray seat:', text);
-                        div.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                        await new Promise(r => setTimeout(r, 300));
-                        div.click();
-                        seatFound = true;
-                        showNotification(`✓ Selected seat: ${text}`, 'success');
-                        return;
-                    }
+        // Sort by seat number
+        availableSeats.sort((a, b) => a.seatNum - b.seatNum);
+
+        return availableSeats;
+    }
+
+    // Click seat and verify selection
+    async function clickSeat(seatInfo) {
+        console.log('[Train Ticket Auto-Seat] Clicking seat:', seatInfo.text);
+
+        // Scroll into view
+        seatInfo.element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        await new Promise(r => setTimeout(r, 500));
+
+        // Try clicking the element
+        seatInfo.element.click();
+        await new Promise(r => setTimeout(r, 500));
+
+        // Also try clicking parent if element itself didn't work
+        if (seatInfo.element.parentElement) {
+            seatInfo.element.parentElement.click();
+        }
+
+        await new Promise(r => setTimeout(r, 1000));
+
+        // Check if selection worked by looking at the Seat Details section
+        const seatDetails = document.body.textContent;
+        if (seatDetails.includes(seatInfo.text)) {
+            console.log('[Train Ticket Auto-Seat] ✓ Seat selected successfully!');
+            return true;
+        }
+
+        return false;
+    }
+
+    // Main function
+    async function autoSelectSeat() {
+        console.log('[Train Ticket Auto-Seat] Starting seat search...');
+
+        const pageReady = await waitForSeats();
+        if (!pageReady) {
+            showNotification('Page loading issue. Please select manually.', 'error');
+            return;
+        }
+
+        showNotification('🔍 Searching for available seats...', 'info');
+
+        // Find all available seats
+        const availableSeats = findAvailableSeats();
+
+        console.log('[Train Ticket Auto-Seat] Found', availableSeats.length, 'available seats');
+
+        if (availableSeats.length === 0) {
+            showNotification('❌ No available seats found! All seats are booked.', 'error');
+            return;
+        }
+
+        // Try to click the first available seat
+        for (const seat of availableSeats) {
+            showNotification(`Trying seat ${seat.text}...`, 'info');
+
+            const success = await clickSeat(seat);
+
+            if (success) {
+                showNotification(`✓ Selected seat: ${seat.text}. Click "CONTINUE PURCHASE" to proceed!`, 'success');
+
+                // Highlight the seat
+                seat.element.style.outline = '3px solid #27ae60';
+                seat.element.style.boxShadow = '0 0 15px 5px rgba(39, 174, 96, 0.5)';
+
+                return;
+            }
+        }
+
+        // If we tried all seats and none worked, try a different approach
+        // Just click the first gray element we find
+        const allElements = document.querySelectorAll('*');
+        for (const el of allElements) {
+            const text = el.textContent.trim();
+            if (text.match(/^CHA-\d+$/) && el.children.length === 0) {
+                const bgColor = window.getComputedStyle(el).backgroundColor;
+                if (isGrayColor(bgColor)) {
+                    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    await new Promise(r => setTimeout(r, 300));
+                    el.click();
+                    await new Promise(r => setTimeout(r, 500));
+
+                    showNotification(`✓ Clicked seat: ${text}. Check if it's selected!`, 'success');
+                    return;
                 }
             }
         }
 
-        if (!seatFound) {
-            console.log('[Train Ticket Auto-Seat] No available seats found after checking', checkedCoaches, 'coaches');
-            showNotification('❌ No available seats found in any coach!', 'error');
-        }
+        showNotification('❌ Could not select any seat. Please select manually.', 'error');
     }
 
     // Run when page is ready
     if (document.readyState === 'complete') {
-        setTimeout(autoSelectSeat, 2000);
+        setTimeout(autoSelectSeat, 3000);
     } else {
-        window.addEventListener('load', () => setTimeout(autoSelectSeat, 2000));
+        window.addEventListener('load', () => setTimeout(autoSelectSeat, 3000));
     }
 })();
