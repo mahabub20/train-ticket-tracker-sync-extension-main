@@ -1,9 +1,9 @@
 {
     "manifest_version": 3,
     "name": "Train Ticket Tracker Sync",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "author": "Mahabub Hossain",
-    "description": "Sync token between BD train sites",
+    "description": "Sync token and auto-grab available tickets from BD Railway",
     "permissions": [
         "storage",
         "scripting",
@@ -17,6 +17,17 @@
         "default_popup": "popup.html",
         "default_title": "Train Ticket Tracker Sync"
     },
+    "content_scripts": [
+        {
+            "matches": [
+                "https://eticket.railway.gov.bd/booking/train/search*"
+            ],
+            "js": [
+                "content-script.js"
+            ],
+            "run_at": "document_idle"
+        }
+    ],
     "icons": {
         "16": "icon.png",
         "32": "icon.png",

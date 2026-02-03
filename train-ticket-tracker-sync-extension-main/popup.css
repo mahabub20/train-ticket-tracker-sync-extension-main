@@ -58,7 +58,24 @@ button {
     box-shadow: 0 2px 4px rgba(39, 174, 96, 0.3);
 }
 
-button:not(#syncBtn) {
+#openAppBtn {
+    background: linear-gradient(135deg, #3498db 0%, #2980b9 100%);
+    color: white;
+    box-shadow: 0 2px 8px rgba(52, 152, 219, 0.3);
+    margin-top: 0;
+}
+
+#openAppBtn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(52, 152, 219, 0.4);
+}
+
+#openAppBtn:active {
+    transform: translateY(0);
+    box-shadow: 0 2px 4px rgba(52, 152, 219, 0.3);
+}
+
+button:not(#syncBtn):not(#openAppBtn) {
     background: #3498db;
     color: white;
     font-size: 12px;
@@ -68,7 +85,7 @@ button:not(#syncBtn) {
     width: auto;
 }
 
-button:not(#syncBtn):hover {
+button:not(#syncBtn):not(#openAppBtn):hover {
     background: #2980b9;
 }
 

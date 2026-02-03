@@ -1,3 +1,8 @@
+// Open Tracker App button - opens the login page directly
+document.getElementById("openAppBtn").addEventListener("click", () => {
+    chrome.tabs.create({ url: "https://train-ticket-notifier.vercel.app/login" });
+});
+
 document.getElementById("syncBtn").addEventListener("click", async () => {
     const statusEl = document.getElementById("status");
     statusEl.textContent = "Syncing...";
@@ -42,7 +47,7 @@ document.getElementById("syncBtn").addEventListener("click", async () => {
             btn.textContent = "Visit tracker";
             btn.onclick = () => {
                 chrome.tabs.create({
-                    url: "https://train-ticket-notifier.vercel.app/",
+                    url: "https://train-ticket-notifier.vercel.app/login",
                 });
             };
             statusEl.appendChild(msg);
