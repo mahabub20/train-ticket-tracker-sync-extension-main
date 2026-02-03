@@ -1,9 +1,12 @@
 // Auto-select seat content script
-// Runs on: https://eticket.railway.gov.bd/booking/train/seat-selection*
+// Runs on seat selection pages
 
 (function () {
     'use strict';
 
+    // Immediate log to confirm script loaded
+    console.log('[Train Ticket Auto-Seat] ===== SCRIPT LOADED =====');
+    console.log('[Train Ticket Auto-Seat] Current URL:', window.location.href);
     console.log('[Train Ticket Auto-Seat] Seat selection page detected');
 
     // Wait for page to fully load with seats

@@ -29,7 +29,9 @@
         },
         {
             "matches": [
-                "https://eticket.railway.gov.bd/booking/train/seat-selection*"
+                "https://eticket.railway.gov.bd/booking/train/seat*",
+                "https://eticket.railway.gov.bd/booking/seat*",
+                "https://eticket.railway.gov.bd/*seat*"
             ],
             "js": [
                 "seat-selection.js"
