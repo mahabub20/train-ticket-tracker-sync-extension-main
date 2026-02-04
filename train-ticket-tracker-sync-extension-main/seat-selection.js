@@ -15,6 +15,10 @@
     // DRAGGABLE DEBUG PANEL
     // ========================================================================
 
+    // ========================================================================
+    // UNIFIED DRAGGABLE DEBUG PANEL
+    // ========================================================================
+
     let logContainer = null;
     let targetSeatCount = 1; // Will be loaded from storage
 
@@ -50,32 +54,33 @@
     }
 
     function createDebugPanel() {
-        const existing = document.querySelector('#auto-seat-debug-panel');
-        if (existing) return existing.querySelector('#debug-log-container');
+        const existing = document.querySelector('#train-ext-debug-panel');
+        if (existing) return existing.querySelector('#train-ext-log-container');
 
         const panel = document.createElement('div');
-        panel.id = 'auto-seat-debug-panel';
+        panel.id = 'train-ext-debug-panel';
         panel.style.cssText = `
-            position: fixed; bottom: 10px; left: 10px; width: 400px; max-height: 280px;
-            background: rgba(0,0,0,0.95); color: #0f0; font-family: monospace; font-size: 11px;
+            position: fixed; bottom: 20px; left: 20px; width: 450px; max-height: 350px;
+            background: rgba(10, 10, 30, 0.95); color: #0f0; font-family: monospace; font-size: 11px;
             padding: 0; border-radius: 8px; z-index: 999999; overflow: hidden;
-            box-shadow: 0 4px 20px rgba(0,0,0,0.5); border: 1px solid #333;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.6); border: 1px solid #445;
+            display: flex; flex-direction: column;
         `;
 
         const header = document.createElement('div');
         header.className = 'drag-header';
         header.style.cssText = `
-            font-weight: bold; padding: 8px 10px; color: #0ff; font-size: 12px;
-            background: linear-gradient(135deg, #1a1a2e, #16213e); 
-            border-bottom: 1px solid #333; user-select: none;
+            font-weight: bold; padding: 10px 12px; color: #fff; font-size: 12px;
+            background: linear-gradient(135deg, #2c3e50, #000);
+            border-bottom: 1px solid #445; user-select: none;
             display: flex; justify-content: space-between; align-items: center;
         `;
-        header.innerHTML = '<span>🎫 Auto-Seat v3.0 (Multi-Seat)</span><span style="color:#666;font-size:10px;">⠿ drag</span>';
+        header.innerHTML = '<span>🚂 Train Tracker Automation</span><span style="color:#aaa;font-size:10px;">⠿ drag</span>';
         panel.appendChild(header);
 
         const container = document.createElement('div');
-        container.id = 'debug-log-container';
-        container.style.cssText = 'padding: 10px; max-height: 230px; overflow-y: auto;';
+        container.id = 'train-ext-log-container';
+        container.style.cssText = 'padding: 10px; flex-grow: 1; overflow-y: auto; max-height: 300px;';
         panel.appendChild(container);
 
         document.body.appendChild(panel);
@@ -90,10 +95,23 @@
 
         if (!logContainer) logContainer = createDebugPanel();
 
-        const colors = { info: '#0f0', warn: '#ff0', error: '#f44', success: '#0ff' };
+        // Check if log container was removed (e.g. by page nav)
+        if (!document.body.contains(logContainer)) {
+            logContainer = createDebugPanel();
+        }
+
+        const colors = { info: '#aaa', warn: '#ff0', error: '#f44', success: '#0f0', highlight: '#0ff' };
         const line = document.createElement('div');
-        line.style.cssText = `color: ${colors[type] || colors.info}; margin-bottom: 3px;`;
-        line.textContent = `[${time}] ${msg}`;
+        line.style.cssText = `color: ${colors[type] || colors.info}; margin-bottom: 4px; border-bottom: 1px solid rgba(255,255,255,0.05); padding-bottom: 2px;`;
+
+        // Add prefix based on type
+        let prefix = '';
+        if (type === 'success') prefix = '✓ ';
+        if (type === 'error') prefix = '❌ ';
+        if (type === 'warn') prefix = '⚠️ ';
+        if (type === 'highlight') prefix = '👉 ';
+
+        line.innerHTML = `<span style="color:#666">[${time}]</span> ${prefix}${msg}`;
         logContainer.appendChild(line);
         logContainer.scrollTop = logContainer.scrollHeight;
     }
