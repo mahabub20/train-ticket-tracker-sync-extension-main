@@ -332,8 +332,95 @@
             selectedSeats.push(seat.text);
             await delay(500); // Wait between clicks
         }
-
         return selectedSeats;
+    }
+
+    // ========================================================================
+    // AUTO-RETRY & NOTIFICATION
+    // ========================================================================
+
+    function playSuccessSound() {
+        try {
+            const ctx = new (window.AudioContext || window.webkitAudioContext)();
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(500, ctx.currentTime);
+            osc.frequency.exponentialRampToValueAtTime(1000, ctx.currentTime + 0.1);
+
+            gain.gain.setValueAtTime(0.1, ctx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.5);
+
+            osc.connect(gain);
+            gain.connect(ctx.destination);
+
+            osc.start();
+            osc.stop(ctx.currentTime + 0.5);
+
+            // Play a second beep
+            setTimeout(() => {
+                const osc2 = ctx.createOscillator();
+                const gain2 = ctx.createGain();
+                osc2.frequency.setValueAtTime(800, ctx.currentTime);
+                osc2.frequency.exponentialRampToValueAtTime(1200, ctx.currentTime + 0.1);
+                gain2.gain.setValueAtTime(0.1, ctx.currentTime);
+                gain2.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.5);
+                osc2.connect(gain2);
+                gain2.connect(ctx.destination);
+                osc2.start();
+                osc2.stop(ctx.currentTime + 0.5);
+            }, 600);
+
+        } catch (e) {
+            console.error('Audio play failed', e);
+        }
+    }
+
+    function startRetryCountdown() {
+        let seconds = 30;
+        notify(`❌ No seats found. Retrying in ${seconds}s...`, 'warning');
+
+        const countdown = setInterval(() => {
+            seconds--;
+            if (seconds <= 0) {
+                clearInterval(countdown);
+                notify('🔄 Reloading page...', 'info');
+                setTimeout(() => location.reload(), 500);
+            } else {
+                const el = document.querySelector('#auto-seat-notification');
+                if (el) {
+                    el.textContent = `❌ No seats found. Retrying in ${seconds}s...`;
+                }
+            }
+        }, 1000);
+    }
+
+    async function clickContinueButton() {
+        log('Looking for Continue button...', 'info');
+        await delay(1000);
+
+        const buttons = document.querySelectorAll('button');
+        let continueBtn = null;
+
+        for (const btn of buttons) {
+            const text = btn.textContent.trim().toLowerCase();
+            if (text.includes('continue') || text.includes('purchase') || text.includes('pay now')) {
+                if (!btn.disabled && btn.offsetParent !== null) {
+                    continueBtn = btn;
+                    break;
+                }
+            }
+        }
+
+        if (continueBtn) {
+            log('Clicking Continue button!', 'success');
+            continueBtn.click();
+            return true;
+        }
+
+        log('Continue button not found', 'warn');
+        return false;
     }
 
     // ========================================================================
@@ -341,87 +428,101 @@
     // ========================================================================
 
     async function autoSelectSeat() {
-        log('=== AUTO SEAT v3.0 (Multi-Seat) ===', 'success');
+        log('=== AUTO SEAT v3.1 (Retry & Alert) ===', 'success');
 
-        // Load seat count from storage
         await loadSeatCount();
-
         notify(`🔍 Looking for ${targetSeatCount} seat(s)...`, 'info');
 
         const hasUI = await waitForSeatUI();
         if (!hasUI) {
-            notify('⚠️ Seat selection not found', 'warning');
+            // If waiting for UI times out, it might be slots haven't opened yet
+            notify('⚠️ Seat selection UI not appearing', 'warning');
+            startRetryCountdown();
             return;
         }
 
         await delay(1500);
 
         let available = findSeats();
+        let selectedCount = 0;
 
-        // Check if we have enough seats
+        // 1. Check current view first
         if (available.length >= targetSeatCount) {
             const selected = await selectMultipleSeats(available, targetSeatCount);
-            notify(`✓ Selected ${selected.length} seat(s): ${selected.join(', ')}`, 'success');
-            return;
-        }
+            selectedCount = selected.length;
+        } else {
+            // 2. Coach Dropdown available?
+            const dropdown = findCoachDropdown();
+            if (dropdown) {
+                const coaches = await getCoaches(dropdown);
+                const withSeats = coaches.filter(c => c.seats > 0).sort((a, b) => {
+                    // Custom sort: prioritize coaches with >= target count, else desc
+                    if (a.seats >= targetSeatCount && b.seats < targetSeatCount) return -1;
+                    if (b.seats >= targetSeatCount && a.seats < targetSeatCount) return 1;
+                    return b.seats - a.seats;
+                });
 
-        // If not enough seats in current coach, try other coaches
-        if (available.length > 0 && available.length < targetSeatCount) {
-            log(`Only ${available.length} seats here, but need ${targetSeatCount}`, 'warn');
-        }
+                if (withSeats.length > 0) {
+                    // Try to satisfy full count
+                    for (const coach of withSeats) {
+                        await selectCoach(dropdown, coach);
+                        available = findSeats();
 
-        const dropdown = findCoachDropdown();
-        if (!dropdown) {
-            // If no dropdown but some seats available, select what we can
-            if (available.length > 0) {
-                const selected = await selectMultipleSeats(available, targetSeatCount);
-                notify(`✓ Selected ${selected.length}/${targetSeatCount} seat(s): ${selected.join(', ')}`, 'warning');
-                return;
-            }
-            notify('❌ Cannot find coach selector', 'error');
-            return;
-        }
+                        if (available.length >= targetSeatCount) {
+                            const selected = await selectMultipleSeats(available, targetSeatCount);
+                            selectedCount = selected.length;
+                            notify(`✓ Secured ${selectedCount} seats in ${coach.name}`, 'success');
+                            break;
+                        }
+                    }
 
-        const coaches = await getCoaches(dropdown);
-        // Sort by available seats, prioritize coaches with enough seats for all
-        const withSeats = coaches.filter(c => c.seats > 0).sort((a, b) => {
-            // Prioritize coaches with at least targetSeatCount seats
-            if (a.seats >= targetSeatCount && b.seats < targetSeatCount) return -1;
-            if (b.seats >= targetSeatCount && a.seats < targetSeatCount) return 1;
-            return b.seats - a.seats;
-        });
-
-        if (withSeats.length === 0) {
-            notify('❌ No seats in any coach!', 'error');
-            return;
-        }
-
-        for (const coach of withSeats) {
-            await selectCoach(dropdown, coach);
-            available = findSeats();
-
-            if (available.length >= targetSeatCount) {
-                const selected = await selectMultipleSeats(available, targetSeatCount);
-                notify(`✓ ${selected.length} seat(s) in ${coach.name}: ${selected.join(', ')}`, 'success');
-                return;
-            } else if (available.length > 0) {
-                // Partial selection - might be acceptable
-                log(`${coach.name} has ${available.length} (need ${targetSeatCount})`, 'warn');
-            }
-        }
-
-        // If we couldn't find a coach with enough seats, select from the best available
-        for (const coach of withSeats) {
-            await selectCoach(dropdown, coach);
-            available = findSeats();
-            if (available.length > 0) {
-                const selected = await selectMultipleSeats(available, Math.min(available.length, targetSeatCount));
-                notify(`⚠️ Only ${selected.length}/${targetSeatCount} seats: ${selected.join(', ')}`, 'warning');
-                return;
+                    // If strict matching failed, try partial if no seats selected yet
+                    if (selectedCount === 0) {
+                        log('Strict count failed, trying to find ANY seats...', 'warn');
+                        for (const coach of withSeats) {
+                            await selectCoach(dropdown, coach);
+                            available = findSeats();
+                            if (available.length > 0) {
+                                const count = Math.min(available.length, targetSeatCount);
+                                const selected = await selectMultipleSeats(available, count);
+                                selectedCount = selected.length;
+                                notify(`⚠️ Partial: ${selectedCount} seats in ${coach.name}`, 'warning');
+                                break;
+                            }
+                        }
+                    }
+                }
+            } else {
+                // No dropdown, check initial available again for partial
+                if (available.length > 0) {
+                    const count = Math.min(available.length, targetSeatCount);
+                    const selected = await selectMultipleSeats(available, count);
+                    selectedCount = selected.length;
+                }
             }
         }
 
-        notify('❌ No available seats found', 'error');
+        if (selectedCount > 0) {
+            // SUCCESS SEQUENCE
+            playSuccessSound();
+            notify(`🎉 TICKET FOUND! Proceeding...`, 'success');
+
+            const notif = document.querySelector('#auto-seat-notification');
+            if (notif) {
+                notif.style.background = '#27ae60';
+                notif.style.boxShadow = '0 0 30px rgba(39, 174, 96, 0.8)';
+                notif.innerHTML = '<h1>🎉 TICKETS SECURED!</h1><p>Proceeding to payment...</p>';
+                // Replace node to clear timeouts
+                const newNotif = notif.cloneNode(true);
+                if (notif.parentNode) notif.parentNode.replaceChild(newNotif, notif);
+            }
+
+            await clickContinueButton();
+            return;
+        }
+
+        // FAILURE SEQUENCE - RETRY
+        startRetryCountdown();
     }
 
     log('Script loaded');
