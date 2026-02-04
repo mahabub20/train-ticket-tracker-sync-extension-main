@@ -1,7 +1,7 @@
 {
     "manifest_version": 3,
     "name": "Train Ticket Tracker Sync",
-    "version": "2.4.0",
+    "version": "2.5.0",
     "author": "Mahabub Hossain",
     "description": "Sync token, auto-grab tickets, and auto-select seats from BD Railway",
     "permissions": [

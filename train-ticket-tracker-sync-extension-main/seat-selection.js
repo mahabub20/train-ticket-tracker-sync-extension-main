@@ -535,7 +535,9 @@
                 if (notif.parentNode) notif.parentNode.replaceChild(newNotif, notif);
             }
 
-            await clickContinueButton();
+            // await clickContinueButton();
+            log('Auto-purchase disabled. Please click continue manually.', 'highlight');
+            notify('👇 Please click CONTINUE manually', 'highlight');
             return;
         }
 
