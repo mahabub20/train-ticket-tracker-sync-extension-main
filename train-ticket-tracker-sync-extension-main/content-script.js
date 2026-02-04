@@ -1,5 +1,5 @@
 // Auto-grab ticket content script
-// Version 2.2 - Draggable debug panel + Train NUMBER matching
+// Version 2.3 - Better URL param handling + train number extraction
 // Runs on: https://eticket.railway.gov.bd/booking/train/search*
 
 (function () {
@@ -11,12 +11,28 @@
     }
     window.__autoGrabInitialized = true;
 
+    // Get ALL URL parameters
     const urlParams = new URLSearchParams(window.location.search);
     const requestedClass = urlParams.get('class');
     const requestedTrain = urlParams.get('train');
     const requestedTrainNumber = urlParams.get('train_number');
 
-    console.log('[Auto-Grab] Params:', { train: requestedTrain, trainNumber: requestedTrainNumber, class: requestedClass });
+    // Also try to extract train number from train name like "RUPOSHI BANGLA EXPRESS (827)"
+    let trainNumberFromName = '';
+    if (requestedTrain) {
+        const match = requestedTrain.match(/\((\d+)\)/);
+        if (match) trainNumberFromName = match[1];
+    }
+
+    const effectiveTrainNumber = requestedTrainNumber || trainNumberFromName;
+
+    console.log('[Auto-Grab] Full URL:', window.location.href);
+    console.log('[Auto-Grab] Params:', {
+        train: requestedTrain,
+        trainNumber: requestedTrainNumber,
+        extractedNumber: trainNumberFromName,
+        class: requestedClass
+    });
 
     // ========================================================================
     // DRAGGABLE DEBUG PANEL
@@ -62,7 +78,7 @@
         const panel = document.createElement('div');
         panel.id = 'auto-grab-debug-panel';
         panel.style.cssText = `
-            position: fixed; bottom: 300px; left: 10px; width: 400px; max-height: 240px;
+            position: fixed; bottom: 300px; left: 10px; width: 420px; max-height: 260px;
             background: rgba(0,0,50,0.95); color: #0ff; font-family: monospace; font-size: 11px;
             padding: 0; border-radius: 8px; z-index: 999998; overflow: hidden;
             box-shadow: 0 4px 20px rgba(0,0,0,0.5); border: 1px solid #334;
@@ -76,12 +92,12 @@
             border-bottom: 1px solid #334; user-select: none;
             display: flex; justify-content: space-between; align-items: center;
         `;
-        header.innerHTML = '<span>🎫 Ticket Grabber v2.2</span><span style="color:#666;font-size:10px;">⠿ drag</span>';
+        header.innerHTML = '<span>🎫 Ticket Grabber v2.3</span><span style="color:#666;font-size:10px;">⠿ drag</span>';
         panel.appendChild(header);
 
         const container = document.createElement('div');
         container.id = 'grab-log-container';
-        container.style.cssText = 'padding: 10px; max-height: 190px; overflow-y: auto;';
+        container.style.cssText = 'padding: 10px; max-height: 210px; overflow-y: auto;';
         panel.appendChild(container);
 
         document.body.appendChild(panel);
@@ -111,14 +127,6 @@
     function normalizeClassName(name) {
         if (!name) return '';
         return name.replace(/_/g, ' ').replace(/\s+/g, ' ').trim().toUpperCase();
-    }
-
-    function extractTrainNumber(text) {
-        if (!text) return '';
-        const match = text.match(/\((\d+)\)/);
-        if (match) return match[1];
-        if (/^\d+$/.test(text.trim())) return text.trim();
-        return '';
     }
 
     function classNamesMatch(class1, class2) {
@@ -192,6 +200,7 @@
             if (el.children.length > 0) continue;
 
             const text = el.textContent.trim();
+            // Match train name pattern: "TRAIN NAME (NUMBER)"
             const match = text.match(/^([A-Z][A-Z\s]+)\s*\((\d+)\)$/);
 
             if (match) {
@@ -273,12 +282,13 @@
     // ========================================================================
 
     async function autoGrabTicket() {
-        log('=== TICKET GRABBER v2.2 ===', 'success');
-        log(`Target: Train#="${requestedTrainNumber}" Class="${requestedClass}"`);
+        log('=== TICKET GRABBER v2.3 ===', 'success');
+        log(`URL params: train="${requestedTrain}" train_number="${requestedTrainNumber}" class="${requestedClass}"`);
+        log(`Effective train#: "${effectiveTrainNumber}"`);
 
-        if (!requestedTrainNumber && !requestedTrain && !requestedClass) {
-            log('No train/class specified', 'warn');
-            notify('No target specified', 'warning');
+        if (!effectiveTrainNumber && !requestedTrain && !requestedClass) {
+            log('No train/class specified in URL', 'warn');
+            notify('No target specified in URL', 'warning');
             return;
         }
 
@@ -297,31 +307,37 @@
             return;
         }
 
+        // Find matching train by train NUMBER
         let targetSection = null;
 
-        if (requestedTrainNumber) {
-            targetSection = trainSections.find(s => s.trainNumber === requestedTrainNumber);
+        if (effectiveTrainNumber) {
+            log(`Searching for train number: ${effectiveTrainNumber}`);
+            targetSection = trainSections.find(s => s.trainNumber === effectiveTrainNumber);
             if (targetSection) {
-                log(`Found train by number: ${targetSection.trainName}`, 'success');
+                log(`✓ FOUND by train number: ${targetSection.trainName}`, 'success');
+            } else {
+                log(`✗ Train #${effectiveTrainNumber} NOT found on this page`, 'warn');
             }
         }
 
+        // Fallback: try partial name match
         if (!targetSection && requestedTrain) {
-            const reqNum = extractTrainNumber(requestedTrain);
-            if (reqNum) {
-                targetSection = trainSections.find(s => s.trainNumber === reqNum);
-            }
-            if (!targetSection) {
-                targetSection = trainSections.find(s =>
-                    s.trainName.toLowerCase().includes(requestedTrain.toLowerCase().substring(0, 15))
-                );
+            log(`Trying name match for: ${requestedTrain}`);
+            const searchName = requestedTrain.replace(/\s*\(\d+\)\s*/, '').toLowerCase().trim();
+            targetSection = trainSections.find(s => {
+                const sectionName = s.trainName.replace(/\s*\(\d+\)\s*/, '').toLowerCase().trim();
+                return sectionName.includes(searchName) || searchName.includes(sectionName);
+            });
+            if (targetSection) {
+                log(`Found by name: ${targetSection.trainName}`, 'success');
             }
         }
 
+        // Final fallback
         if (!targetSection) {
             targetSection = trainSections[0];
             log(`Using first train: ${targetSection.trainName}`, 'warn');
-            notify(`⚠️ Train not found. Using ${targetSection.trainName}`, 'warning');
+            notify(`⚠ Train ${effectiveTrainNumber || requestedTrain} not found. Using ${targetSection.trainName}`, 'warning');
         }
 
         const cards = findTicketCardsInSection(targetSection);
@@ -332,22 +348,28 @@
             return;
         }
 
+        // Find matching class
         let selectedCard = null;
 
         if (requestedClass) {
+            log(`Searching for class: ${requestedClass}`);
             selectedCard = cards.find(c => classNamesMatch(c.className, requestedClass));
             if (selectedCard) {
-                log(`Found class: ${selectedCard.className}`, 'success');
+                log(`✓ FOUND class: ${selectedCard.className}`, 'success');
+            } else {
+                log(`✗ Class ${requestedClass} not found`, 'warn');
             }
         }
 
+        // Fallback to first available
         if (!selectedCard) {
             selectedCard = cards.find(c => c.available > 0) || cards[0];
             if (requestedClass) {
-                notify(`⚠️ ${requestedClass} unavailable. Using ${selectedCard.className}`, 'warning');
+                notify(`⚠ ${requestedClass} unavailable. Using ${selectedCard.className}`, 'warning');
             }
         }
 
+        // Click the button
         if (selectedCard) {
             notify(`✓ ${targetSection.trainName} - ${selectedCard.className}`, 'success');
 
@@ -365,6 +387,7 @@
     }
 
     log('Script loaded');
+    log(`Full URL: ${window.location.href.substring(0, 100)}...`);
 
     if (document.readyState === 'complete') {
         setTimeout(autoGrabTicket, 1500);
