@@ -1,7 +1,7 @@
 {
     "manifest_version": 3,
     "name": "Train Ticket Tracker Sync",
-    "version": "2.0.0",
+    "version": "2.1.0",
     "author": "Mahabub Hossain",
     "description": "Sync token, auto-grab tickets, and auto-select seats from BD Railway",
     "permissions": [
@@ -18,6 +18,15 @@
         "default_title": "Train Ticket Tracker Sync"
     },
     "content_scripts": [
+        {
+            "matches": [
+                "https://train-ticket-notifier.vercel.app/*"
+            ],
+            "js": [
+                "webapp-listener.js"
+            ],
+            "run_at": "document_idle"
+        },
         {
             "matches": [
                 "https://eticket.railway.gov.bd/booking/train/search*"
