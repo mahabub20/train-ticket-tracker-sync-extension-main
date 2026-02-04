@@ -1,31 +1,101 @@
 // Enhanced Auto-select seat content script
+// Version 2.1 - With Debug Panel for troubleshooting
 // Runs on seat selection pages
-// Version 2.0 - Improved coach switching and seat detection
 
 (function () {
     'use strict';
 
-    console.log('[Train Ticket Auto-Seat] ===== SCRIPT LOADED (Enhanced v2.0) =====');
+    // ========================================================================
+    // DEBUG PANEL - Shows what's happening on the page
+    // ========================================================================
 
-    // Configuration
+    const debugLogs = [];
+
+    function createDebugPanel() {
+        const panel = document.createElement('div');
+        panel.id = 'auto-seat-debug-panel';
+        panel.style.cssText = `
+            position: fixed;
+            bottom: 10px;
+            left: 10px;
+            width: 400px;
+            max-height: 300px;
+            background: rgba(0, 0, 0, 0.9);
+            color: #00ff00;
+            font-family: monospace;
+            font-size: 11px;
+            padding: 10px;
+            border-radius: 8px;
+            z-index: 999999;
+            overflow-y: auto;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+        `;
+
+        const header = document.createElement('div');
+        header.style.cssText = 'font-weight: bold; margin-bottom: 8px; color: #00ffff; font-size: 12px;';
+        header.textContent = '🔧 Auto-Seat Debug Panel v2.1';
+        panel.appendChild(header);
+
+        const logContainer = document.createElement('div');
+        logContainer.id = 'debug-log-container';
+        panel.appendChild(logContainer);
+
+        document.body.appendChild(panel);
+        return logContainer;
+    }
+
+    let logContainer = null;
+
+    function debugLog(message, type = 'info') {
+        const timestamp = new Date().toLocaleTimeString();
+        const logEntry = `[${timestamp}] ${message}`;
+        debugLogs.push(logEntry);
+        console.log(`[Auto-Seat] ${message}`);
+
+        if (!logContainer) {
+            logContainer = createDebugPanel();
+        }
+
+        const colors = {
+            info: '#00ff00',
+            warn: '#ffff00',
+            error: '#ff4444',
+            success: '#00ffff'
+        };
+
+        const logLine = document.createElement('div');
+        logLine.style.color = colors[type] || colors.info;
+        logLine.style.marginBottom = '4px';
+        logLine.textContent = logEntry;
+        logContainer.appendChild(logLine);
+        logContainer.scrollTop = logContainer.scrollHeight;
+    }
+
+    debugLog('Script loaded!', 'success');
+    debugLog(`URL: ${window.location.href}`);
+
+    // ========================================================================
+    // CONFIGURATION
+    // ========================================================================
+
     const CONFIG = {
-        MAX_WAIT_ATTEMPTS: 60,      // 30 seconds max wait
-        POLL_INTERVAL: 500,         // 500ms between checks
-        COACH_SWITCH_DELAY: 2000,   // Wait after switching coach
-        SEAT_CLICK_DELAY: 500,      // Delay between seat click attempts
-        NOTIFICATION_DURATION: 5000 // 5 seconds
+        MAX_WAIT_ATTEMPTS: 40,
+        POLL_INTERVAL: 500,
+        COACH_SWITCH_DELAY: 2500,
+        SEAT_CLICK_DELAY: 800
     };
-
-    // ========================================================================
-    // UTILITY FUNCTIONS
-    // ========================================================================
 
     function delay(ms) {
         return new Promise(resolve => setTimeout(resolve, ms));
     }
 
-    // Show notification banner
+    // ========================================================================
+    // NOTIFICATION
+    // ========================================================================
+
     function showNotification(message, type = 'info') {
+        debugLog(`NOTIFICATION: ${message}`, type === 'error' ? 'error' : 'info');
+
         const existing = document.querySelector('#auto-seat-notification');
         if (existing) existing.remove();
 
@@ -41,7 +111,6 @@
             font-weight: 600;
             z-index: 999999;
             box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-            animation: slideIn 0.3s ease;
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             max-width: 400px;
         `;
@@ -56,362 +125,363 @@
         notification.style.background = colors[type] || colors.info;
         notification.style.color = type === 'warning' ? '#333' : 'white';
         notification.textContent = message;
-
-        if (!document.querySelector('#auto-seat-styles')) {
-            const style = document.createElement('style');
-            style.id = 'auto-seat-styles';
-            style.textContent = `
-                @keyframes slideIn {
-                    from { transform: translateX(100%); opacity: 0; }
-                    to { transform: translateX(0); opacity: 1; }
-                }
-            `;
-            document.head.appendChild(style);
-        }
-
         document.body.appendChild(notification);
 
-        setTimeout(() => {
-            notification.style.animation = 'slideIn 0.3s ease reverse';
-            setTimeout(() => notification.remove(), 300);
-        }, type === 'error' ? 10000 : CONFIG.NOTIFICATION_DURATION);
+        setTimeout(() => notification.remove(), 8000);
     }
 
     // ========================================================================
-    // PAGE DETECTION
+    // ELEMENT SCANNING
     // ========================================================================
 
-    // Wait for page to be ready with coach selector
-    function waitForPageReady() {
-        return new Promise((resolve) => {
-            let attempts = 0;
+    function scanPageElements() {
+        debugLog('Scanning page elements...');
 
-            const checkInterval = setInterval(() => {
-                // Look for coach dropdown - multiple selectors for different UIs
-                const coachDropdown = findCoachDropdown();
-                const coachText = document.body.innerText;
+        // Look for text containing "Seat(s)"
+        const allText = document.body.innerText;
+        const seatMatches = allText.match(/[A-Z]+\s*-\s*\d+\s*Seat\(s\)/g);
+        if (seatMatches) {
+            debugLog(`Found seat text patterns: ${seatMatches.join(', ')}`);
+        } else {
+            debugLog('No "X - N Seat(s)" patterns found in page text', 'warn');
+        }
 
-                // Check if we have the coach selector UI
-                if (coachDropdown || coachText.includes('Select Coach') || coachText.includes('Seat(s)')) {
-                    clearInterval(checkInterval);
-                    setTimeout(() => resolve(true), 1000);
-                } else {
-                    attempts++;
-                    if (attempts >= CONFIG.MAX_WAIT_ATTEMPTS) {
-                        clearInterval(checkInterval);
-                        resolve(false);
-                    }
-                }
-            }, CONFIG.POLL_INTERVAL);
+        // Look for Select Coach text
+        if (allText.includes('Select Coach')) {
+            debugLog('Found "Select Coach" text on page');
+        }
+
+        // Count all select elements
+        const selects = document.querySelectorAll('select');
+        debugLog(`Found ${selects.length} <select> elements`);
+        selects.forEach((sel, i) => {
+            debugLog(`  Select #${i}: ${sel.options.length} options`);
+            if (sel.options.length > 0) {
+                const optTexts = Array.from(sel.options).slice(0, 3).map(o => o.text);
+                debugLog(`    First options: ${optTexts.join(', ')}`);
+            }
         });
+
+        // Look for MUI-style elements
+        const muiSelects = document.querySelectorAll('[class*="MuiSelect"], [class*="Select"]');
+        debugLog(`Found ${muiSelects.length} MUI-style select elements`);
+
+        // Look for clickable elements with Seat(s) text
+        const allElements = document.querySelectorAll('*');
+        let coachElements = [];
+        for (const el of allElements) {
+            const text = el.textContent.trim();
+            if (text.match(/^[A-Z]+\s*-\s*\d+\s*Seat\(s\)$/) && el.children.length === 0) {
+                coachElements.push({ element: el, text });
+            }
+        }
+        debugLog(`Found ${coachElements.length} coach label elements`);
+        coachElements.forEach(c => debugLog(`  Coach: "${c.text}"`));
+
+        // Look for seat-like elements
+        let seatElements = [];
+        for (const el of allElements) {
+            const text = el.textContent.trim();
+            if (text.match(/^[A-Z]+-\d+$/) && el.children.length === 0) {
+                seatElements.push({ element: el, text, bg: window.getComputedStyle(el).backgroundColor });
+            }
+        }
+        debugLog(`Found ${seatElements.length} seat-like elements`);
+        if (seatElements.length > 0) {
+            seatElements.slice(0, 5).forEach(s => {
+                debugLog(`  Seat: "${s.text}" bg: ${s.bg}`);
+            });
+        }
+
+        return { coachElements, seatElements, selects };
     }
 
     // ========================================================================
-    // COACH DROPDOWN DETECTION & HANDLING
+    // COACH DROPDOWN
     // ========================================================================
 
-    // Find the coach dropdown element
     function findCoachDropdown() {
-        // Strategy 1: Look for select element with coach options
+        debugLog('Looking for coach dropdown...');
+
+        // Strategy 1: <select> elements
         const selects = document.querySelectorAll('select');
         for (const select of selects) {
-            const optionsText = Array.from(select.options).map(o => o.text).join(' ');
-            if (optionsText.includes('Seat(s)') || optionsText.match(/[A-Z]+-/)) {
-                console.log('[Train Ticket Auto-Seat] Found <select> dropdown');
+            const options = Array.from(select.options);
+            const hasSeatOptions = options.some(o => o.text.includes('Seat(s)'));
+            if (hasSeatOptions) {
+                debugLog('Found native <select> dropdown with Seat(s) options', 'success');
                 return { type: 'select', element: select };
             }
         }
 
-        // Strategy 2: Look for custom dropdown (MUI, etc.)
-        // Find elements containing "Seat(s)" pattern like "KA - 5 Seat(s)"
-        const allDivs = document.querySelectorAll('div, span');
-        for (const el of allDivs) {
+        // Strategy 2: Look for parent of coach label
+        const allElements = document.querySelectorAll('*');
+        for (const el of allElements) {
             const text = el.textContent.trim();
-            // Match patterns like "KA - 0 Seat(s)" or "GHA - 5 Seat(s)"
-            if (text.match(/^[A-Z]+\s*-\s*\d+\s*Seat\(s\)$/)) {
-                // Check if this is clickable (has click handler or role)
-                const parent = el.closest('[role="button"], [role="combobox"], .MuiSelect-root, [class*="Select"], [class*="Dropdown"]');
-                if (parent) {
-                    console.log('[Train Ticket Auto-Seat] Found custom dropdown:', text);
-                    return { type: 'custom', element: parent, display: el };
+            if (text.match(/^[A-Z]+\s*-\s*\d+\s*Seat\(s\)$/) && el.children.length === 0) {
+                debugLog(`Found coach label: "${text}"`);
+
+                // Walk up to find clickable parent
+                let parent = el.parentElement;
+                for (let i = 0; i < 5 && parent; i++) {
+                    const role = parent.getAttribute('role');
+                    const classes = parent.className || '';
+
+                    if (role === 'button' || role === 'combobox' ||
+                        classes.includes('Select') || classes.includes('Dropdown') ||
+                        classes.includes('MuiSelect') || classes.includes('MuiInput')) {
+                        debugLog(`Found clickable parent at level ${i}: role=${role}, class=${classes.substring(0, 50)}`, 'success');
+                        return { type: 'custom', element: parent, display: el };
+                    }
+                    parent = parent.parentElement;
                 }
-                // Even without role, might be clickable
-                console.log('[Train Ticket Auto-Seat] Found potential dropdown:', text);
+
+                // If no special parent found, try the immediate parent
+                debugLog('No special parent found, using direct parent');
                 return { type: 'custom', element: el.parentElement || el, display: el };
             }
         }
 
-        // Strategy 3: Look for "Select Coach" label and find adjacent dropdown
-        const labels = document.querySelectorAll('*');
-        for (const label of labels) {
-            if (label.textContent.trim() === 'Select Coach' && label.children.length === 0) {
-                // Find the next sibling or parent's next child that could be dropdown
-                let container = label.parentElement;
-                if (container) {
-                    const dropdown = container.querySelector('select, [role="button"], [role="combobox"], [class*="Select"]');
-                    if (dropdown) {
-                        console.log('[Train Ticket Auto-Seat] Found dropdown via label');
-                        return { type: dropdown.tagName === 'SELECT' ? 'select' : 'custom', element: dropdown };
-                    }
-                }
-            }
-        }
-
+        debugLog('No coach dropdown found!', 'error');
         return null;
     }
 
-    // Get all coaches with their seat counts
     async function getCoachOptions(dropdownInfo) {
-        const coaches = [];
+        debugLog('Getting coach options...');
 
         if (dropdownInfo.type === 'select') {
             const select = dropdownInfo.element;
+            const coaches = [];
             for (let i = 0; i < select.options.length; i++) {
-                const option = select.options[i];
-                const text = option.text;
+                const text = select.options[i].text;
                 const match = text.match(/([A-Z]+)\s*-\s*(\d+)\s*Seat/);
                 if (match) {
                     coaches.push({
                         name: match[1],
                         seats: parseInt(match[2]),
                         index: i,
-                        element: option,
                         text: text
                     });
                 }
             }
-        } else {
-            // Custom dropdown - need to open it first
-            const trigger = dropdownInfo.element;
-            trigger.click();
-            await delay(500);
-
-            // Look for dropdown options in the DOM
-            const options = document.querySelectorAll('li[role="option"], [role="option"], [class*="MenuItem"], [class*="Option"]');
-
-            for (const option of options) {
-                const text = option.textContent.trim();
-                const match = text.match(/([A-Z]+)\s*-\s*(\d+)\s*Seat/);
-                if (match) {
-                    coaches.push({
-                        name: match[1],
-                        seats: parseInt(match[2]),
-                        element: option,
-                        text: text
-                    });
-                }
-            }
-
-            // Close dropdown by clicking elsewhere
-            document.body.click();
-            await delay(300);
+            debugLog(`Found ${coaches.length} coaches in select: ${coaches.map(c => `${c.name}:${c.seats}`).join(', ')}`);
+            return coaches;
         }
 
-        console.log('[Train Ticket Auto-Seat] Found coaches:', coaches.map(c => `${c.name}: ${c.seats} seats`));
-        return coaches;
-    }
+        // Custom dropdown - click to open
+        debugLog('Opening custom dropdown...');
+        dropdownInfo.element.click();
+        await delay(800);
 
-    // Select a specific coach
-    async function selectCoach(dropdownInfo, coach) {
-        console.log('[Train Ticket Auto-Seat] Selecting coach:', coach.name);
-        showNotification(`Selecting coach ${coach.name} (${coach.seats} seats)...`, 'info');
+        // Look for options
+        const options = document.querySelectorAll('li, [role="option"], [class*="MenuItem"], [class*="Option"]');
+        debugLog(`Found ${options.length} potential option elements`);
 
-        if (dropdownInfo.type === 'select') {
-            const select = dropdownInfo.element;
-            select.selectedIndex = coach.index;
-            select.dispatchEvent(new Event('change', { bubbles: true }));
-        } else {
-            // Open dropdown
-            dropdownInfo.element.click();
-            await delay(500);
-
-            // Click the option
-            coach.element.click();
-        }
-
-        // Wait for seats to load
-        await delay(CONFIG.COACH_SWITCH_DELAY);
-    }
-
-    // ========================================================================
-    // SEAT DETECTION & SELECTION
-    // ========================================================================
-
-    // Check if a color is gray (available seat indicator)
-    function isAvailableColor(element) {
-        const bgColor = window.getComputedStyle(element).backgroundColor;
-        const parentBg = element.parentElement ? window.getComputedStyle(element.parentElement).backgroundColor : '';
-
-        function checkGray(rgb) {
-            if (!rgb) return false;
-            const match = rgb.match(/rgb\s*\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/);
-            if (!match) return false;
-
-            const r = parseInt(match[1]);
-            const g = parseInt(match[2]);
-            const b = parseInt(match[3]);
-
-            // Gray: R≈G≈B, all in range 100-220
-            const isGray = Math.abs(r - g) < 25 && Math.abs(g - b) < 25 && Math.abs(r - b) < 25;
-            const inRange = r >= 100 && r <= 230 && g >= 100 && g <= 230 && b >= 100 && b <= 230;
-
-            return isGray && inRange;
-        }
-
-        return checkGray(bgColor) || checkGray(parentBg);
-    }
-
-    // Find all visible seats on the page
-    function findAllSeats() {
-        const seats = [];
-        const allElements = document.querySelectorAll('div, span, button');
-
-        for (const el of allElements) {
-            const text = el.textContent.trim();
-
-            // Match seat patterns: KA-1, GHA-5, CHA-10, etc.
-            if (text.match(/^[A-Z]+-\d+$/) && el.children.length === 0) {
-                const isAvailable = isAvailableColor(el);
-
-                seats.push({
-                    element: el,
-                    text: text,
-                    seatNum: parseInt(text.split('-')[1]),
-                    isAvailable: isAvailable
+        const coaches = [];
+        for (const opt of options) {
+            const text = opt.textContent.trim();
+            const match = text.match(/([A-Z]+)\s*-\s*(\d+)\s*Seat/);
+            if (match) {
+                coaches.push({
+                    name: match[1],
+                    seats: parseInt(match[2]),
+                    element: opt,
+                    text: text
                 });
             }
         }
 
+        debugLog(`Parsed ${coaches.length} coach options: ${coaches.map(c => `${c.name}:${c.seats}`).join(', ')}`);
+
+        // Close dropdown
+        document.body.click();
+        await delay(300);
+
+        return coaches;
+    }
+
+    async function selectCoach(dropdownInfo, coach) {
+        debugLog(`Selecting coach: ${coach.name} (${coach.seats} seats)...`);
+        showNotification(`🔄 Switching to ${coach.name}...`, 'info');
+
+        if (dropdownInfo.type === 'select') {
+            const select = dropdownInfo.element;
+            select.value = select.options[coach.index].value;
+            select.selectedIndex = coach.index;
+
+            // Dispatch multiple events to trigger React/Angular change handlers
+            select.dispatchEvent(new Event('input', { bubbles: true }));
+            select.dispatchEvent(new Event('change', { bubbles: true }));
+            select.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+
+            debugLog('Dispatched change events on select');
+        } else {
+            dropdownInfo.element.click();
+            await delay(600);
+
+            // Re-find the option (DOM might have changed)
+            const options = document.querySelectorAll('li, [role="option"], [class*="MenuItem"]');
+            for (const opt of options) {
+                if (opt.textContent.includes(coach.name)) {
+                    debugLog(`Clicking option for ${coach.name}`);
+                    opt.click();
+                    break;
+                }
+            }
+        }
+
+        await delay(CONFIG.COACH_SWITCH_DELAY);
+        debugLog('Coach switch complete, waiting for seats to load...');
+    }
+
+    // ========================================================================
+    // SEAT DETECTION
+    // ========================================================================
+
+    function isAvailableColor(element) {
+        const bg = window.getComputedStyle(element).backgroundColor;
+        const parentBg = element.parentElement ? window.getComputedStyle(element.parentElement).backgroundColor : '';
+
+        function isGray(rgb) {
+            if (!rgb || rgb === 'transparent' || rgb === 'rgba(0, 0, 0, 0)') return false;
+            const match = rgb.match(/rgba?\s*\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/);
+            if (!match) return false;
+            const [, r, g, b] = match.map(Number);
+            const isGrayish = Math.abs(r - g) < 30 && Math.abs(g - b) < 30;
+            const inRange = r >= 80 && r <= 240;
+            return isGrayish && inRange;
+        }
+
+        return isGray(bg) || isGray(parentBg);
+    }
+
+    function findAvailableSeats() {
+        debugLog('Scanning for available seats...');
+
+        const seats = [];
+        const allElements = document.querySelectorAll('div, span, button, td');
+
+        for (const el of allElements) {
+            const text = el.textContent.trim();
+            if (text.match(/^[A-Z]+-\d+$/) && el.children.length === 0) {
+                const available = isAvailableColor(el);
+                if (available) {
+                    seats.push({
+                        element: el,
+                        text: text,
+                        num: parseInt(text.split('-')[1])
+                    });
+                }
+            }
+        }
+
+        seats.sort((a, b) => a.num - b.num);
+        debugLog(`Found ${seats.length} available seats: ${seats.slice(0, 5).map(s => s.text).join(', ')}${seats.length > 5 ? '...' : ''}`);
         return seats;
     }
 
-    // Find available seats only
-    function findAvailableSeats() {
-        return findAllSeats().filter(s => s.isAvailable).sort((a, b) => a.seatNum - b.seatNum);
-    }
+    async function clickSeat(seat) {
+        debugLog(`Clicking seat: ${seat.text}`);
 
-    // Click on a seat element
-    async function clickSeat(seatInfo) {
-        console.log('[Train Ticket Auto-Seat] Clicking seat:', seatInfo.text);
+        seat.element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        await delay(400);
 
-        // Scroll to seat
-        seatInfo.element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        await delay(300);
+        // Add visual indicator
+        seat.element.style.outline = '4px solid #00ff00';
+        seat.element.style.boxShadow = '0 0 15px 5px #00ff00';
 
-        // Try clicking the element
-        seatInfo.element.click();
+        // Click the element
+        seat.element.click();
         await delay(CONFIG.SEAT_CLICK_DELAY);
 
-        // Also try clicking parent (some UIs need this)
-        if (seatInfo.element.parentElement) {
-            seatInfo.element.parentElement.click();
+        // Try parent click too
+        if (seat.element.parentElement) {
+            seat.element.parentElement.click();
         }
-        await delay(CONFIG.SEAT_CLICK_DELAY);
 
-        // Highlight the selected seat
-        seatInfo.element.style.outline = '4px solid #27ae60';
-        seatInfo.element.style.boxShadow = '0 0 10px 3px #27ae60';
-
+        debugLog(`Clicked seat ${seat.text}`, 'success');
         return true;
     }
 
     // ========================================================================
-    // MAIN LOGIC
+    // MAIN
     // ========================================================================
 
     async function autoSelectSeat() {
-        console.log('[Train Ticket Auto-Seat] Starting auto seat selection...');
-        showNotification('🔍 Starting seat selection...', 'info');
+        debugLog('=== Starting Auto Seat Selection ===', 'success');
+        showNotification('🔍 Auto-selecting seat...', 'info');
 
-        // Step 1: Wait for page to be ready
-        const pageReady = await waitForPageReady();
-        if (!pageReady) {
-            showNotification('⚠️ Page loading issue. Please select manually.', 'warning');
-            return;
-        }
+        await delay(1500); // Initial wait for page
 
-        // Step 2: Find the coach dropdown
-        const dropdownInfo = findCoachDropdown();
+        // First, scan the page
+        const scan = scanPageElements();
 
-        if (!dropdownInfo) {
-            console.log('[Train Ticket Auto-Seat] No coach dropdown found, trying direct seat selection');
-            // Maybe seats are already visible without coach selection
-            const availableSeats = findAvailableSeats();
-            if (availableSeats.length > 0) {
-                await clickSeat(availableSeats[0]);
-                showNotification(`✓ Selected seat: ${availableSeats[0].text}`, 'success');
-                return;
-            }
-            showNotification('❌ Could not find coach dropdown or seats', 'error');
-            return;
-        }
-
-        // Step 3: Get all coach options
-        const coaches = await getCoachOptions(dropdownInfo);
-
-        if (coaches.length === 0) {
-            showNotification('❌ No coaches found', 'error');
-            return;
-        }
-
-        // Step 4: Sort coaches by available seats (highest first)
-        const coachesWithSeats = coaches.filter(c => c.seats > 0).sort((a, b) => b.seats - a.seats);
-
-        if (coachesWithSeats.length === 0) {
-            showNotification('❌ No seats available in any coach!', 'error');
-            return;
-        }
-
-        console.log('[Train Ticket Auto-Seat] Coaches with seats:', coachesWithSeats.map(c => `${c.name}: ${c.seats}`));
-
-        // Step 5: Try each coach until we find an available seat
-        for (const coach of coachesWithSeats) {
-            showNotification(`🔄 Checking ${coach.name} (${coach.seats} seats)...`, 'info');
-
-            // Select this coach
-            await selectCoach(dropdownInfo, coach);
-
-            // Wait a bit more for seats to render
-            await delay(1500);
-
-            // Look for available seats
-            const availableSeats = findAvailableSeats();
-            console.log(`[Train Ticket Auto-Seat] Found ${availableSeats.length} available seats in ${coach.name}`);
-
-            if (availableSeats.length > 0) {
-                // Select the first available seat
-                await clickSeat(availableSeats[0]);
-                showNotification(`✓ Selected seat ${availableSeats[0].text} in coach ${coach.name}!`, 'success');
+        // If we already see seats, try to select one
+        if (scan.seatElements.length > 0) {
+            debugLog('Seats visible on page, checking availability...');
+            const available = findAvailableSeats();
+            if (available.length > 0) {
+                await clickSeat(available[0]);
+                showNotification(`✓ Selected: ${available[0].text}`, 'success');
+                debugLog('Done!', 'success');
                 return;
             }
         }
 
-        // If we get here, no seats were found
-        showNotification('❌ Could not select a seat. Please try manually.', 'error');
+        // Find and use coach dropdown
+        const dropdown = findCoachDropdown();
+        if (!dropdown) {
+            debugLog('Cannot proceed without coach dropdown', 'error');
+            showNotification('❌ Could not find coach selector', 'error');
+            return;
+        }
+
+        // Get all coaches
+        const coaches = await getCoachOptions(dropdown);
+        const withSeats = coaches.filter(c => c.seats > 0).sort((a, b) => b.seats - a.seats);
+
+        if (withSeats.length === 0) {
+            debugLog('No coaches have available seats!', 'error');
+            showNotification('❌ No seats in any coach!', 'error');
+            return;
+        }
+
+        debugLog(`Coaches with seats: ${withSeats.map(c => `${c.name}:${c.seats}`).join(', ')}`);
+
+        // Try each coach
+        for (const coach of withSeats) {
+            await selectCoach(dropdown, coach);
+
+            const available = findAvailableSeats();
+            if (available.length > 0) {
+                await clickSeat(available[0]);
+                showNotification(`✓ Selected ${available[0].text} in ${coach.name}!`, 'success');
+                debugLog('=== SUCCESS ===', 'success');
+                return;
+            }
+
+            debugLog(`No available seats found in ${coach.name}, trying next...`, 'warn');
+        }
+
+        debugLog('Could not select any seat', 'error');
+        showNotification('❌ Could not select seat. Try manually.', 'error');
     }
 
     // ========================================================================
     // INITIALIZATION
     // ========================================================================
 
-    // Run when page is ready
+    debugLog('Setting up initialization...');
+
     if (document.readyState === 'complete') {
+        debugLog('Document ready, starting in 2s...');
         setTimeout(autoSelectSeat, 2000);
     } else {
-        window.addEventListener('load', () => setTimeout(autoSelectSeat, 2000));
+        debugLog('Waiting for document load...');
+        window.addEventListener('load', () => {
+            debugLog('Document loaded, starting in 2s...');
+            setTimeout(autoSelectSeat, 2000);
+        });
     }
-
-    // Also listen for URL changes (SPA navigation)
-    let lastUrl = location.href;
-    new MutationObserver(() => {
-        const url = location.href;
-        if (url !== lastUrl) {
-            lastUrl = url;
-            if (url.includes('seat')) {
-                console.log('[Train Ticket Auto-Seat] URL changed, rerunning...');
-                setTimeout(autoSelectSeat, 2000);
-            }
-        }
-    }).observe(document.body, { subtree: true, childList: true });
 
 })();
