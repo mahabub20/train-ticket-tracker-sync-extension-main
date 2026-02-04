@@ -239,9 +239,10 @@
             for (let i = 0; i < 6 && card; i++) {
                 const text = card.textContent || '';
 
-                const classPatterns = ['AC_S', 'AC S', 'S_CHAIR', 'S CHAIR', 'SNIGDHA', 'SHOVAN', 'SHOVON', 'F_BERTH', 'F BERTH', 'SLPR'];
+                const classPatterns = ['AC_S', 'AC S', 'AC CHAIR', 'AC_CHAIR', 'S_CHAIR', 'S CHAIR', 'SNIGDHA', 'SHOVAN', 'SHOVON', 'F_BERTH', 'F BERTH', 'F_SEAT', 'F SEAT', 'FIRST SEAT', 'FIRST_SEAT', 'SLPR', 'SHULOV'];
                 for (const pattern of classPatterns) {
-                    if (text.toUpperCase().includes(pattern) && !className) {
+                    if (!className && text.toUpperCase().includes(pattern)) {
+                        // Double check it's not a substring of another class if possible, but simpler is better for now
                         className = pattern;
                     }
                 }
@@ -251,7 +252,8 @@
                     availCount = parseInt(availMatch[1]);
                 }
 
-                if (availCount > 0) break;
+                // Only break if we found BOTH class and availability
+                if (availCount > 0 && className) break;
                 card = card.parentElement;
             }
 
