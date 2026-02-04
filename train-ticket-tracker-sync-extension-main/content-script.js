@@ -1,38 +1,154 @@
 // Auto-grab ticket content script
+// Version 2.0 - Improved train and class matching
 // Runs on: https://eticket.railway.gov.bd/booking/train/search*
 
 (function () {
     'use strict';
+
+    // Prevent double execution
+    if (window.__autoGrabInitialized) {
+        console.log('[Auto-Grab] Already initialized');
+        return;
+    }
+    window.__autoGrabInitialized = true;
 
     // Get parameters from URL
     const urlParams = new URLSearchParams(window.location.search);
     const requestedClass = urlParams.get('class');
     const requestedTrain = urlParams.get('train');
 
-    console.log('[Train Ticket Auto-Grab] Looking for train:', requestedTrain, 'class:', requestedClass);
+    console.log('[Auto-Grab] Looking for train:', requestedTrain, 'class:', requestedClass);
 
-    // Wait for the page to fully load train cards
+    // ========================================================================
+    // DEBUG PANEL
+    // ========================================================================
+
+    let logContainer = null;
+
+    function createDebugPanel() {
+        const existing = document.querySelector('#auto-grab-debug-panel');
+        if (existing) return existing.querySelector('#grab-log-container');
+
+        const panel = document.createElement('div');
+        panel.id = 'auto-grab-debug-panel';
+        panel.style.cssText = `
+            position: fixed; bottom: 300px; left: 10px; width: 380px; max-height: 200px;
+            background: rgba(0,0,50,0.95); color: #0ff; font-family: monospace; font-size: 11px;
+            padding: 10px; border-radius: 8px; z-index: 999998; overflow-y: auto;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+        `;
+
+        const header = document.createElement('div');
+        header.style.cssText = 'font-weight: bold; margin-bottom: 8px; color: #ff0; font-size: 12px;';
+        header.textContent = '🎫 Ticket Grabber v2.0';
+        panel.appendChild(header);
+
+        const container = document.createElement('div');
+        container.id = 'grab-log-container';
+        panel.appendChild(container);
+
+        document.body.appendChild(panel);
+        return container;
+    }
+
+    function log(msg, type = 'info') {
+        const time = new Date().toLocaleTimeString();
+        console.log(`[Auto-Grab ${time}] ${msg}`);
+
+        if (!logContainer) logContainer = createDebugPanel();
+
+        const colors = { info: '#0ff', warn: '#ff0', error: '#f44', success: '#0f0' };
+        const line = document.createElement('div');
+        line.style.cssText = `color: ${colors[type] || colors.info}; margin-bottom: 3px;`;
+        line.textContent = `[${time}] ${msg}`;
+        logContainer.appendChild(line);
+        logContainer.scrollTop = logContainer.scrollHeight;
+    }
+
+    // ========================================================================
+    // UTILITIES
+    // ========================================================================
+
+    function normalizeClassName(name) {
+        if (!name) return '';
+        // Convert S_CHAIR to S CHAIR, s_chair to S CHAIR, etc.
+        return name.replace(/_/g, ' ').replace(/\s+/g, ' ').trim().toUpperCase();
+    }
+
+    function normalizeTrainName(name) {
+        if (!name) return '';
+        // Make it lowercase for comparison, remove extra spaces
+        return name.replace(/\s+/g, ' ').trim().toLowerCase();
+    }
+
+    function trainNamesMatch(name1, name2) {
+        if (!name1 || !name2) return false;
+        const n1 = normalizeTrainName(name1);
+        const n2 = normalizeTrainName(name2);
+        // Check if one contains the other (handles partial matches)
+        return n1.includes(n2) || n2.includes(n1) || n1 === n2;
+    }
+
+    function classNamesMatch(class1, class2) {
+        if (!class1 || !class2) return false;
+        const c1 = normalizeClassName(class1);
+        const c2 = normalizeClassName(class2);
+        return c1 === c2 || c1.includes(c2) || c2.includes(c1);
+    }
+
+    const delay = ms => new Promise(r => setTimeout(r, ms));
+
+    // ========================================================================
+    // NOTIFICATION
+    // ========================================================================
+
+    function notify(msg, type = 'success') {
+        log(`NOTIFY: ${msg}`, type === 'success' ? 'success' : type);
+
+        const existing = document.querySelector('#auto-grab-notification');
+        if (existing) existing.remove();
+
+        const el = document.createElement('div');
+        el.id = 'auto-grab-notification';
+        el.style.cssText = `
+            position: fixed; top: 70px; right: 20px; padding: 14px 20px;
+            border-radius: 8px; font-size: 15px; font-weight: 600; z-index: 999999;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3); max-width: 380px;
+            font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+        `;
+
+        const bg = { success: '#27ae60', warning: '#f39c12', error: '#e74c3c' };
+        el.style.background = bg[type] || bg.success;
+        el.style.color = type === 'warning' ? '#333' : '#fff';
+        el.textContent = msg;
+        document.body.appendChild(el);
+        setTimeout(() => el.remove(), 8000);
+    }
+
+    // ========================================================================
+    // FIND TRAIN AND CLASS
+    // ========================================================================
+
     function waitForTrainCards() {
-        return new Promise((resolve) => {
+        return new Promise(resolve => {
+            log('Waiting for train cards to load...');
             let attempts = 0;
-            const maxAttempts = 40; // 20 seconds max
 
-            const checkInterval = setInterval(() => {
-                // Look for train cards with train names
-                const trainCards = document.querySelectorAll('.MuiCard-root, [class*="card"], [class*="Card"]');
-                const bookButtons = document.querySelectorAll('button');
-                const bookNowButtons = Array.from(bookButtons).filter(btn =>
-                    btn.textContent.trim().toUpperCase() === 'BOOK NOW'
+            const check = setInterval(() => {
+                const buttons = document.querySelectorAll('button');
+                const bookNow = Array.from(buttons).filter(b =>
+                    b.textContent.trim().toUpperCase() === 'BOOK NOW'
                 );
 
-                if (bookNowButtons.length > 0 || trainCards.length > 0) {
-                    clearInterval(checkInterval);
-                    // Wait a bit more for full render
+                if (bookNow.length > 0) {
+                    log(`Found ${bookNow.length} BOOK NOW buttons`, 'success');
+                    clearInterval(check);
                     setTimeout(() => resolve(true), 1000);
                 } else {
                     attempts++;
-                    if (attempts >= maxAttempts) {
-                        clearInterval(checkInterval);
+                    if (attempts >= 40) {
+                        clearInterval(check);
+                        log('No BOOK NOW buttons found after 20s', 'error');
                         resolve(false);
                     }
                 }
@@ -40,232 +156,197 @@
         });
     }
 
-    // Get the train section that contains a specific train name
-    function findTrainSection(trainName) {
-        if (!trainName) return null;
+    function findAllTrainCards() {
+        const cards = [];
 
-        // Look for the train name in the page
-        const allElements = document.querySelectorAll('*');
-        for (const el of allElements) {
-            if (el.children.length === 0 && el.textContent.includes(trainName)) {
-                // Found the train name, now find the parent section/card
-                let parent = el.parentElement;
-                for (let i = 0; i < 10; i++) {
-                    if (!parent) break;
-                    // Check if this parent contains BOOK NOW buttons
-                    const bookBtns = parent.querySelectorAll('button');
-                    const hasBookNow = Array.from(bookBtns).some(btn =>
-                        btn.textContent.trim().toUpperCase() === 'BOOK NOW'
-                    );
-                    if (hasBookNow) {
-                        return parent;
-                    }
-                    parent = parent.parentElement;
-                }
-            }
-        }
-        return null;
-    }
-
-    // Find seat class card within a section
-    function findSeatClassCard(section, className) {
-        if (!section || !className) return null;
-
-        // Look for elements containing the class name
-        const allText = section.querySelectorAll('*');
-        for (const el of allText) {
-            if (el.textContent.includes(className)) {
-                // Find the parent that contains a BOOK NOW button
-                let parent = el;
-                for (let i = 0; i < 8; i++) {
-                    if (!parent) break;
-                    const btn = parent.querySelector('button');
-                    if (btn && btn.textContent.trim().toUpperCase() === 'BOOK NOW') {
-                        return { card: parent, button: btn };
-                    }
-                    parent = parent.parentElement;
-                }
-            }
-        }
-        return null;
-    }
-
-    // Find any available BOOK NOW button in a section
-    function findAnyAvailableInSection(section) {
-        const buttons = section.querySelectorAll('button');
-        for (const btn of buttons) {
-            if (btn.textContent.trim().toUpperCase() === 'BOOK NOW') {
-                // Check if the parent card shows available tickets
-                let parent = btn.parentElement;
-                for (let i = 0; i < 5; i++) {
-                    if (!parent) break;
-                    const text = parent.textContent;
-                    // Check if available tickets > 0
-                    if (text.match(/Available\s*Tickets[^0-9]*(\d+)/i)) {
-                        const match = text.match(/Available\s*Tickets[^0-9]*(\d+)/i);
-                        if (match && parseInt(match[1]) > 0) {
-                            return btn;
-                        }
-                    }
-                    parent = parent.parentElement;
-                }
-                // If we can't determine availability, return the button anyway
-                return btn;
-            }
-        }
-        return null;
-    }
-
-    // Fallback: find any BOOK NOW button on the page
-    function findAnyBookNowButton() {
+        // Strategy: Find all BOOK NOW buttons and walk up to their containers
         const buttons = document.querySelectorAll('button');
+
         for (const btn of buttons) {
-            if (btn.textContent.trim().toUpperCase() === 'BOOK NOW') {
-                return btn;
+            if (btn.textContent.trim().toUpperCase() !== 'BOOK NOW') continue;
+
+            // Walk up to find the ticket card (contains class name and price)
+            let ticketCard = btn.parentElement;
+            for (let i = 0; i < 5; i++) {
+                if (!ticketCard) break;
+                const text = ticketCard.textContent || '';
+                if (text.includes('Available Tickets') || text.includes('Including VAT')) {
+                    break;
+                }
+                ticketCard = ticketCard.parentElement;
+            }
+
+            // Now find the train section (contains train name)
+            let trainSection = ticketCard;
+            let trainName = '';
+            for (let i = 0; i < 10; i++) {
+                if (!trainSection) break;
+                // Look for train name pattern: UPPERCASE WORDS (NUMBER)
+                const text = trainSection.textContent || '';
+                const match = text.match(/([A-Z\s]+)\s*\((\d+)\)/);
+                if (match) {
+                    trainName = match[0].trim();
+                    break;
+                }
+                trainSection = trainSection.parentElement;
+            }
+
+            // Find class name near the button
+            let className = '';
+            let searchArea = ticketCard || btn.parentElement;
+            if (searchArea) {
+                const text = searchArea.textContent || '';
+                // Common class patterns
+                const classPatterns = ['AC_S', 'AC S', 'S_CHAIR', 'S CHAIR', 'SNIGDHA', 'SHOVAN', 'SHOVON', 'F_BERTH', 'F BERTH', 'F_SEAT', 'F SEAT', 'SLPR'];
+                for (const pattern of classPatterns) {
+                    if (text.toUpperCase().includes(pattern)) {
+                        className = pattern;
+                        break;
+                    }
+                }
+            }
+
+            // Get availability count
+            let availCount = 0;
+            const availMatch = (ticketCard?.textContent || '').match(/(\d+)\s*$/);
+            if (availMatch) {
+                availCount = parseInt(availMatch[1]);
+            }
+
+            cards.push({
+                button: btn,
+                trainName: trainName,
+                className: className,
+                available: availCount,
+                card: ticketCard
+            });
+        }
+
+        return cards;
+    }
+
+    function findBestMatch(cards, targetTrain, targetClass) {
+        log(`Searching ${cards.length} cards for train="${targetTrain}" class="${targetClass}"`);
+
+        // Log all found cards for debugging
+        cards.forEach((c, i) => {
+            log(`  Card ${i}: train="${c.trainName?.substring(0, 30)}" class="${c.className}" avail=${c.available}`);
+        });
+
+        // Priority 1: Exact train + exact class
+        for (const card of cards) {
+            if (trainNamesMatch(card.trainName, targetTrain) && classNamesMatch(card.className, targetClass)) {
+                log(`Found exact match!`, 'success');
+                return { card, matchType: 'exact' };
             }
         }
+
+        // Priority 2: Train matches, any class with availability
+        for (const card of cards) {
+            if (trainNamesMatch(card.trainName, targetTrain) && card.available > 0) {
+                log(`Found train match with class=${card.className}`, 'warn');
+                return { card, matchType: 'train_only' };
+            }
+        }
+
+        // Priority 3: Class matches, any train
+        for (const card of cards) {
+            if (classNamesMatch(card.className, targetClass) && card.available > 0) {
+                log(`Found class match on train=${card.trainName}`, 'warn');
+                return { card, matchType: 'class_only' };
+            }
+        }
+
+        // Priority 4: Any card with availability
+        for (const card of cards) {
+            if (card.available > 0) {
+                log(`Fallback to any available ticket`, 'warn');
+                return { card, matchType: 'fallback' };
+            }
+        }
+
+        // Priority 5: First card
+        if (cards.length > 0) {
+            log(`No match, using first card`, 'warn');
+            return { card: cards[0], matchType: 'first' };
+        }
+
         return null;
     }
 
-    // Show notification
-    function showNotification(message, type = 'success') {
-        const notification = document.createElement('div');
-        notification.style.cssText = `
-            position: fixed;
-            top: 20px;
-            right: 20px;
-            padding: 16px 24px;
-            border-radius: 8px;
-            font-size: 16px;
-            font-weight: 600;
-            z-index: 999999;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-            animation: slideIn 0.3s ease;
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            max-width: 400px;
-        `;
+    // ========================================================================
+    // MAIN
+    // ========================================================================
 
-        if (type === 'success') {
-            notification.style.background = 'linear-gradient(135deg, #27ae60, #2ecc71)';
-            notification.style.color = 'white';
-        } else if (type === 'warning') {
-            notification.style.background = 'linear-gradient(135deg, #f39c12, #f1c40f)';
-            notification.style.color = '#333';
-        } else {
-            notification.style.background = 'linear-gradient(135deg, #e74c3c, #c0392b)';
-            notification.style.color = 'white';
-        }
-
-        notification.textContent = message;
-
-        // Add animation style
-        const style = document.createElement('style');
-        style.textContent = `
-            @keyframes slideIn {
-                from { transform: translateX(100%); opacity: 0; }
-                to { transform: translateX(0); opacity: 1; }
-            }
-        `;
-        document.head.appendChild(style);
-
-        document.body.appendChild(notification);
-
-        // Remove after 6 seconds
-        setTimeout(() => {
-            notification.style.animation = 'slideIn 0.3s ease reverse';
-            setTimeout(() => notification.remove(), 300);
-        }, 6000);
-    }
-
-    // Highlight element
-    function highlightElement(element) {
-        if (element) {
-            element.style.boxShadow = '0 0 20px 5px #27ae60';
-            element.style.transition = 'box-shadow 0.3s ease';
-        }
-    }
-
-    // Main function
     async function autoGrabTicket() {
-        console.log('[Train Ticket Auto-Grab] Starting auto-grab...');
+        log('=== TICKET GRABBER v2.0 ===', 'success');
+        log(`Target: Train="${requestedTrain}" Class="${requestedClass}"`);
 
-        const pageLoaded = await waitForTrainCards();
-
-        if (!pageLoaded) {
-            console.log('[Train Ticket Auto-Grab] Page did not load properly');
-            showNotification('Page loading issue. Please try manually.', 'error');
+        if (!requestedTrain && !requestedClass) {
+            log('No train/class specified in URL params', 'warn');
+            notify('No target train specified. Select manually.', 'warning');
             return;
         }
 
-        let buttonToClick = null;
-        let selectedInfo = '';
-
-        // Strategy 1: Find specific train section first
-        if (requestedTrain) {
-            console.log('[Train Ticket Auto-Grab] Looking for train:', requestedTrain);
-            const trainSection = findTrainSection(requestedTrain);
-
-            if (trainSection) {
-                console.log('[Train Ticket Auto-Grab] Found train section');
-
-                // Try to find the specific class
-                if (requestedClass) {
-                    const seatCard = findSeatClassCard(trainSection, requestedClass);
-                    if (seatCard && seatCard.button) {
-                        buttonToClick = seatCard.button;
-                        selectedInfo = `${requestedTrain} - ${requestedClass}`;
-                        highlightElement(seatCard.card);
-                        console.log('[Train Ticket Auto-Grab] Found exact match!');
-                    }
-                }
-
-                // If specific class not found, get any available in this train
-                if (!buttonToClick) {
-                    buttonToClick = findAnyAvailableInSection(trainSection);
-                    if (buttonToClick) {
-                        selectedInfo = `${requestedTrain} (different class)`;
-                        showNotification(`${requestedClass} not available. Selecting another class for ${requestedTrain}`, 'warning');
-                    }
-                }
-            } else {
-                console.log('[Train Ticket Auto-Grab] Train not found on page');
-            }
+        const loaded = await waitForTrainCards();
+        if (!loaded) {
+            notify('Page loading issue. Please try manually.', 'error');
+            return;
         }
 
-        // Strategy 2: Fallback to any BOOK NOW button
-        if (!buttonToClick) {
-            console.log('[Train Ticket Auto-Grab] Using fallback - finding any available ticket');
-            buttonToClick = findAnyBookNowButton();
-            if (buttonToClick) {
-                selectedInfo = 'First available ticket';
-                showNotification('Specific train not found. Selecting first available.', 'warning');
-            }
+        await delay(500);
+
+        const cards = findAllTrainCards();
+        log(`Found ${cards.length} ticket cards`);
+
+        if (cards.length === 0) {
+            notify('No tickets found on page!', 'error');
+            return;
         }
 
-        // Click the button
-        if (buttonToClick) {
-            console.log('[Train Ticket Auto-Grab] Clicking button for:', selectedInfo);
+        const match = findBestMatch(cards, requestedTrain, requestedClass);
 
-            // Small delay before clicking
-            await new Promise(resolve => setTimeout(resolve, 500));
+        if (!match) {
+            notify('No matching tickets found!', 'error');
+            return;
+        }
 
-            buttonToClick.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        const { card, matchType } = match;
 
-            await new Promise(resolve => setTimeout(resolve, 300));
-
-            buttonToClick.click();
-
-            showNotification(`✓ Selected: ${selectedInfo}`, 'success');
+        // Show notification based on match type
+        if (matchType === 'exact') {
+            notify(`✓ Found: ${requestedTrain} - ${requestedClass}`, 'success');
+        } else if (matchType === 'train_only') {
+            notify(`⚠️ ${requestedClass} not found. Using ${card.className} instead.`, 'warning');
+        } else if (matchType === 'class_only') {
+            notify(`⚠️ Train not found. Using ${card.trainName?.substring(0, 30)}`, 'warning');
         } else {
-            console.log('[Train Ticket Auto-Grab] No available tickets found');
-            showNotification('No tickets available!', 'error');
+            notify(`⚠️ Using first available ticket`, 'warning');
         }
+
+        // Highlight and click
+        if (card.card) {
+            card.card.style.boxShadow = '0 0 20px 5px #27ae60';
+        }
+
+        await delay(500);
+        card.button.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        await delay(300);
+
+        log(`Clicking BOOK NOW button...`, 'success');
+        card.button.click();
     }
 
-    // Run when page is ready
+    // ========================================================================
+    // INIT
+    // ========================================================================
+
+    log('Script loaded');
+
     if (document.readyState === 'complete') {
         setTimeout(autoGrabTicket, 1500);
     } else {
         window.addEventListener('load', () => setTimeout(autoGrabTicket, 1500));
     }
+
 })();
