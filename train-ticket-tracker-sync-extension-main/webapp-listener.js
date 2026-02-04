@@ -9,22 +9,27 @@
 
     // Listen for custom event from the page
     window.addEventListener('trainTargetSelected', async (event) => {
-        const { trainNumber, trainClass, trainName } = event.detail || {};
+        const { trainNumber, trainClass, trainName, seatCount } = event.detail || {};
 
-        console.log('[Train Tracker Extension] Target received:', { trainNumber, trainClass, trainName });
+        console.log('[Train Tracker Extension] Target received:', { trainNumber, trainClass, trainName, seatCount });
 
         if (trainNumber || trainClass) {
             try {
+                // Get current seat count from storage (keep user's preference)
+                const current = await chrome.storage.local.get(['targetSeatCount']);
+                const effectiveSeatCount = seatCount || current.targetSeatCount || 1;
+
                 await chrome.storage.local.set({
                     targetTrainNumber: trainNumber || '',
                     targetTrainClass: trainClass || '',
-                    targetTrainName: trainName || ''
+                    targetTrainName: trainName || '',
+                    targetSeatCount: effectiveSeatCount
                 });
 
                 console.log('[Train Tracker Extension] Target saved to storage!');
 
                 // Show confirmation toast
-                showToast(`✓ Target set: Train #${trainNumber} - ${trainClass}`);
+                showToast(`✓ Target set: Train #${trainNumber} - ${trainClass} (${effectiveSeatCount} seats)`);
             } catch (e) {
                 console.error('[Train Tracker Extension] Error saving:', e);
             }

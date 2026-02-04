@@ -9,7 +9,7 @@
 <body>
     <div class="container">
         <h3>Train Ticket Tracker Sync</h3>
-        
+
         <div class="section">
             <h4>🎯 Target Selection</h4>
             <div class="input-group">
@@ -27,6 +27,15 @@
                     <option value="F_BERTH">F Berth</option>
                     <option value="F_SEAT">F Seat</option>
                     <option value="SLPR">Sleeper</option>
+                </select>
+            </div>
+            <div class="input-group">
+                <label for="seatCount">Number of Seats:</label>
+                <select id="seatCount">
+                    <option value="1">1</option>
+                    <option value="2">2</option>
+                    <option value="3">3</option>
+                    <option value="4">4 (Max)</option>
                 </select>
             </div>
             <button id="saveTargetBtn">💾 Save Target</button>

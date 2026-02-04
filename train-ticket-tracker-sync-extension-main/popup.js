@@ -2,22 +2,25 @@
 
 // Load saved target on popup open
 document.addEventListener('DOMContentLoaded', async () => {
-    const result = await chrome.storage.local.get(['targetTrainNumber', 'targetTrainClass']);
+    const result = await chrome.storage.local.get(['targetTrainNumber', 'targetTrainClass', 'targetSeatCount']);
     if (result.targetTrainNumber) {
         document.getElementById('trainNumber').value = result.targetTrainNumber;
     }
     if (result.targetTrainClass) {
         document.getElementById('trainClass').value = result.targetTrainClass;
     }
+    if (result.targetSeatCount) {
+        document.getElementById('seatCount').value = result.targetSeatCount;
+    }
 
     // Show current target
-    updateTargetStatus(result.targetTrainNumber, result.targetTrainClass);
+    updateTargetStatus(result.targetTrainNumber, result.targetTrainClass, result.targetSeatCount);
 });
 
-function updateTargetStatus(trainNum, trainClass) {
+function updateTargetStatus(trainNum, trainClass, seatCount) {
     const statusEl = document.getElementById('targetStatus');
     if (trainNum || trainClass) {
-        statusEl.textContent = `Current: Train #${trainNum || 'Any'} - ${trainClass || 'Any class'}`;
+        statusEl.textContent = `Current: Train #${trainNum || 'Any'} - ${trainClass || 'Any'} (${seatCount || 1} seat${seatCount > 1 ? 's' : ''})`;
         statusEl.style.color = '#0f0';
     } else {
         statusEl.textContent = 'No target set (will select first available)';
@@ -29,19 +32,21 @@ function updateTargetStatus(trainNum, trainClass) {
 document.getElementById('saveTargetBtn').addEventListener('click', async () => {
     const trainNumber = document.getElementById('trainNumber').value.trim();
     const trainClass = document.getElementById('trainClass').value;
+    const seatCount = parseInt(document.getElementById('seatCount').value) || 1;
 
     await chrome.storage.local.set({
         targetTrainNumber: trainNumber,
-        targetTrainClass: trainClass
+        targetTrainClass: trainClass,
+        targetSeatCount: seatCount
     });
 
-    updateTargetStatus(trainNumber, trainClass);
+    updateTargetStatus(trainNumber, trainClass, seatCount);
 
     const statusEl = document.getElementById('targetStatus');
     statusEl.textContent = '✓ Target saved!';
     statusEl.style.color = '#0f0';
 
-    setTimeout(() => updateTargetStatus(trainNumber, trainClass), 2000);
+    setTimeout(() => updateTargetStatus(trainNumber, trainClass, seatCount), 2000);
 });
 
 // Open Tracker App button

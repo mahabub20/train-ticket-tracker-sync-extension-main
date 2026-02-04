@@ -1,5 +1,5 @@
 // Enhanced Auto-select seat content script
-// Version 2.4 - Draggable debug panel
+// Version 3.0 - Multi-seat selection from Chrome storage
 // Available = light gray/white, Booked = orange, Selected = teal/green
 
 (function () {
@@ -16,6 +16,7 @@
     // ========================================================================
 
     let logContainer = null;
+    let targetSeatCount = 1; // Will be loaded from storage
 
     function makeDraggable(panel) {
         let isDragging = false;
@@ -69,7 +70,7 @@
             border-bottom: 1px solid #333; user-select: none;
             display: flex; justify-content: space-between; align-items: center;
         `;
-        header.innerHTML = '<span>🎫 Auto-Seat v2.4</span><span style="color:#666;font-size:10px;">⠿ drag</span>';
+        header.innerHTML = '<span>🎫 Auto-Seat v3.0 (Multi-Seat)</span><span style="color:#666;font-size:10px;">⠿ drag</span>';
         panel.appendChild(header);
 
         const container = document.createElement('div');
@@ -120,6 +121,24 @@
     }
 
     const delay = ms => new Promise(r => setTimeout(r, ms));
+
+    // ========================================================================
+    // LOAD SEAT COUNT FROM STORAGE
+    // ========================================================================
+
+    async function loadSeatCount() {
+        try {
+            const result = await chrome.storage.local.get(['targetSeatCount']);
+            targetSeatCount = parseInt(result.targetSeatCount) || 1;
+            // Ensure max 4
+            if (targetSeatCount > 4) targetSeatCount = 4;
+            if (targetSeatCount < 1) targetSeatCount = 1;
+            log(`Target seat count: ${targetSeatCount}`, 'success');
+        } catch (e) {
+            log('Could not load seat count, using 1', 'warn');
+            targetSeatCount = 1;
+        }
+    }
 
     // ========================================================================
     // WAIT FOR SEAT UI
@@ -201,34 +220,37 @@
         sel.dispatchEvent(new Event('change', { bubbles: true }));
         sel.dispatchEvent(new Event('input', { bubbles: true }));
 
-        await delay(3000);
-        log('Coach selected');
+        await delay(2000);
     }
 
     // ========================================================================
-    // SEAT DETECTION
+    // SEAT COLOR DETECTION
     // ========================================================================
-
-    function parseRGB(rgb) {
-        if (!rgb || rgb === 'transparent' || rgb === 'rgba(0, 0, 0, 0)') return null;
-        const m = rgb.match(/rgba?\s*\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/);
-        if (!m) return null;
-        return { r: parseInt(m[1]), g: parseInt(m[2]), b: parseInt(m[3]) };
-    }
 
     function classifySeatColor(bgColor) {
-        const c = parseRGB(bgColor);
-        if (!c) return 'unknown';
+        if (!bgColor || bgColor === 'transparent' || bgColor === 'rgba(0, 0, 0, 0)') {
+            return 'unknown';
+        }
 
-        const { r, g, b } = c;
+        const match = bgColor.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
+        if (!match) return 'unknown';
 
-        if (r > 180 && g > 100 && g < 180 && b < 100) return 'booked';
-        if (g > r && g > b && g > 150) return 'selected';
+        const r = parseInt(match[1]);
+        const g = parseInt(match[2]);
+        const b = parseInt(match[3]);
 
-        const isGrayish = Math.abs(r - g) < 40 && Math.abs(g - b) < 40 && Math.abs(r - b) < 40;
-        if (isGrayish && r >= 100 && r <= 240) return 'available';
-        if (r > 200 && g > 200 && b > 200) return 'available';
-        if (r >= 100 && r <= 200 && g >= 100 && g <= 200 && b >= 100 && b <= 220) return 'available';
+        // Orange = booked (200+, 100-180, 0-100)
+        if (r > 200 && g > 80 && g < 180 && b < 100) return 'booked';
+
+        // Green/Teal = selected (0-100, 150+, 100+)
+        if (r < 100 && g > 140 && b > 100) return 'selected';
+        if (g > 180 && b > 140 && r < 150) return 'selected';
+
+        // Light gray/white = available (all > 180)
+        if (r > 180 && g > 180 && b > 180) return 'available';
+
+        // Medium gray = available (130-200 all similar)
+        if (r > 130 && g > 130 && b > 130 && Math.abs(r - g) < 30 && Math.abs(g - b) < 30) return 'available';
 
         return 'unknown';
     }
@@ -236,12 +258,20 @@
     function isAvailableSeat(element) {
         const bg = window.getComputedStyle(element).backgroundColor;
         let status = classifySeatColor(bg);
+
         if (status === 'available') return true;
         if (status === 'booked' || status === 'selected') return false;
 
         if (element.parentElement) {
             const parentBg = window.getComputedStyle(element.parentElement).backgroundColor;
             status = classifySeatColor(parentBg);
+            if (status === 'available') return true;
+            if (status === 'booked' || status === 'selected') return false;
+        }
+
+        if (element.parentElement && element.parentElement.parentElement) {
+            const grandBg = window.getComputedStyle(element.parentElement.parentElement).backgroundColor;
+            status = classifySeatColor(grandBg);
             if (status === 'available') return true;
             if (status === 'booked' || status === 'selected') return false;
         }
@@ -277,13 +307,33 @@
     async function clickSeat(seat) {
         log(`Clicking seat: ${seat.text}`, 'success');
         seat.element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        await delay(500);
+        await delay(300);
         seat.element.style.outline = '4px solid #00ff00';
         seat.element.style.boxShadow = '0 0 20px 8px rgba(0,255,0,0.6)';
         seat.element.click();
-        await delay(600);
+        await delay(400);
         if (seat.element.parentElement) seat.element.parentElement.click();
         return true;
+    }
+
+    // ========================================================================
+    // MULTI-SEAT SELECTION
+    // ========================================================================
+
+    async function selectMultipleSeats(availableSeats, count) {
+        const selectedSeats = [];
+        const toSelect = Math.min(count, availableSeats.length, 4); // Max 4
+
+        log(`Selecting ${toSelect} seats...`, 'success');
+
+        for (let i = 0; i < toSelect; i++) {
+            const seat = availableSeats[i];
+            await clickSeat(seat);
+            selectedSeats.push(seat.text);
+            await delay(500); // Wait between clicks
+        }
+
+        return selectedSeats;
     }
 
     // ========================================================================
@@ -291,8 +341,12 @@
     // ========================================================================
 
     async function autoSelectSeat() {
-        log('=== AUTO SEAT v2.4 ===', 'success');
-        notify('🔍 Looking for seats...', 'info');
+        log('=== AUTO SEAT v3.0 (Multi-Seat) ===', 'success');
+
+        // Load seat count from storage
+        await loadSeatCount();
+
+        notify(`🔍 Looking for ${targetSeatCount} seat(s)...`, 'info');
 
         const hasUI = await waitForSeatUI();
         if (!hasUI) {
@@ -303,20 +357,39 @@
         await delay(1500);
 
         let available = findSeats();
-        if (available.length > 0) {
-            await clickSeat(available[0]);
-            notify(`✓ Selected: ${available[0].text}`, 'success');
+
+        // Check if we have enough seats
+        if (available.length >= targetSeatCount) {
+            const selected = await selectMultipleSeats(available, targetSeatCount);
+            notify(`✓ Selected ${selected.length} seat(s): ${selected.join(', ')}`, 'success');
             return;
+        }
+
+        // If not enough seats in current coach, try other coaches
+        if (available.length > 0 && available.length < targetSeatCount) {
+            log(`Only ${available.length} seats here, but need ${targetSeatCount}`, 'warn');
         }
 
         const dropdown = findCoachDropdown();
         if (!dropdown) {
+            // If no dropdown but some seats available, select what we can
+            if (available.length > 0) {
+                const selected = await selectMultipleSeats(available, targetSeatCount);
+                notify(`✓ Selected ${selected.length}/${targetSeatCount} seat(s): ${selected.join(', ')}`, 'warning');
+                return;
+            }
             notify('❌ Cannot find coach selector', 'error');
             return;
         }
 
         const coaches = await getCoaches(dropdown);
-        const withSeats = coaches.filter(c => c.seats > 0).sort((a, b) => b.seats - a.seats);
+        // Sort by available seats, prioritize coaches with enough seats for all
+        const withSeats = coaches.filter(c => c.seats > 0).sort((a, b) => {
+            // Prioritize coaches with at least targetSeatCount seats
+            if (a.seats >= targetSeatCount && b.seats < targetSeatCount) return -1;
+            if (b.seats >= targetSeatCount && a.seats < targetSeatCount) return 1;
+            return b.seats - a.seats;
+        });
 
         if (withSeats.length === 0) {
             notify('❌ No seats in any coach!', 'error');
@@ -326,12 +399,26 @@
         for (const coach of withSeats) {
             await selectCoach(dropdown, coach);
             available = findSeats();
+
+            if (available.length >= targetSeatCount) {
+                const selected = await selectMultipleSeats(available, targetSeatCount);
+                notify(`✓ ${selected.length} seat(s) in ${coach.name}: ${selected.join(', ')}`, 'success');
+                return;
+            } else if (available.length > 0) {
+                // Partial selection - might be acceptable
+                log(`${coach.name} has ${available.length} (need ${targetSeatCount})`, 'warn');
+            }
+        }
+
+        // If we couldn't find a coach with enough seats, select from the best available
+        for (const coach of withSeats) {
+            await selectCoach(dropdown, coach);
+            available = findSeats();
             if (available.length > 0) {
-                await clickSeat(available[0]);
-                notify(`✓ ${available[0].text} in ${coach.name}!`, 'success');
+                const selected = await selectMultipleSeats(available, Math.min(available.length, targetSeatCount));
+                notify(`⚠️ Only ${selected.length}/${targetSeatCount} seats: ${selected.join(', ')}`, 'warning');
                 return;
             }
-            log(`No seats in ${coach.name}`, 'warn');
         }
 
         notify('❌ No available seats found', 'error');
