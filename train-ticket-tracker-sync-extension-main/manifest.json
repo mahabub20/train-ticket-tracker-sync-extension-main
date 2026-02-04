@@ -1,7 +1,7 @@
 {
     "manifest_version": 3,
     "name": "Train Ticket Tracker Sync",
-    "version": "1.3.0",
+    "version": "1.4.0",
     "author": "Mahabub Hossain",
     "description": "Sync token, auto-grab tickets, and auto-select seats from BD Railway",
     "permissions": [
@@ -23,15 +23,15 @@
                 "https://eticket.railway.gov.bd/booking/train/search*"
             ],
             "js": [
-                "content-script.js"
+                "content-script.js",
+                "seat-selection.js"
             ],
             "run_at": "document_idle"
         },
         {
             "matches": [
                 "https://eticket.railway.gov.bd/booking/train/seat*",
-                "https://eticket.railway.gov.bd/booking/seat*",
-                "https://eticket.railway.gov.bd/*seat*"
+                "https://eticket.railway.gov.bd/booking/seat*"
             ],
             "js": [
                 "seat-selection.js"
