@@ -1,5 +1,5 @@
 // Auto-grab ticket content script
-// Version 2.1 - Match by train NUMBER for reliability
+// Version 2.2 - Draggable debug panel + Train NUMBER matching
 // Runs on: https://eticket.railway.gov.bd/booking/train/search*
 
 (function () {
@@ -11,7 +11,6 @@
     }
     window.__autoGrabInitialized = true;
 
-    // Get parameters from URL
     const urlParams = new URLSearchParams(window.location.search);
     const requestedClass = urlParams.get('class');
     const requestedTrain = urlParams.get('train');
@@ -20,10 +19,41 @@
     console.log('[Auto-Grab] Params:', { train: requestedTrain, trainNumber: requestedTrainNumber, class: requestedClass });
 
     // ========================================================================
-    // DEBUG PANEL
+    // DRAGGABLE DEBUG PANEL
     // ========================================================================
 
     let logContainer = null;
+
+    function makeDraggable(panel) {
+        let isDragging = false;
+        let offsetX = 0, offsetY = 0;
+
+        const header = panel.querySelector('.drag-header');
+        if (!header) return;
+
+        header.style.cursor = 'move';
+
+        header.addEventListener('mousedown', (e) => {
+            isDragging = true;
+            offsetX = e.clientX - panel.offsetLeft;
+            offsetY = e.clientY - panel.offsetTop;
+            panel.style.opacity = '0.9';
+        });
+
+        document.addEventListener('mousemove', (e) => {
+            if (!isDragging) return;
+            e.preventDefault();
+            panel.style.left = (e.clientX - offsetX) + 'px';
+            panel.style.top = (e.clientY - offsetY) + 'px';
+            panel.style.bottom = 'auto';
+            panel.style.right = 'auto';
+        });
+
+        document.addEventListener('mouseup', () => {
+            isDragging = false;
+            panel.style.opacity = '1';
+        });
+    }
 
     function createDebugPanel() {
         const existing = document.querySelector('#auto-grab-debug-panel');
@@ -32,22 +62,31 @@
         const panel = document.createElement('div');
         panel.id = 'auto-grab-debug-panel';
         panel.style.cssText = `
-            position: fixed; bottom: 300px; left: 10px; width: 400px; max-height: 220px;
+            position: fixed; bottom: 300px; left: 10px; width: 400px; max-height: 240px;
             background: rgba(0,0,50,0.95); color: #0ff; font-family: monospace; font-size: 11px;
-            padding: 10px; border-radius: 8px; z-index: 999998; overflow-y: auto;
-            box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+            padding: 0; border-radius: 8px; z-index: 999998; overflow: hidden;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.5); border: 1px solid #334;
         `;
 
         const header = document.createElement('div');
-        header.style.cssText = 'font-weight: bold; margin-bottom: 8px; color: #ff0; font-size: 12px;';
-        header.textContent = '🎫 Ticket Grabber v2.1 (Train# Match)';
+        header.className = 'drag-header';
+        header.style.cssText = `
+            font-weight: bold; padding: 8px 10px; color: #ff0; font-size: 12px;
+            background: linear-gradient(135deg, #1a1a3e, #162040);
+            border-bottom: 1px solid #334; user-select: none;
+            display: flex; justify-content: space-between; align-items: center;
+        `;
+        header.innerHTML = '<span>🎫 Ticket Grabber v2.2</span><span style="color:#666;font-size:10px;">⠿ drag</span>';
         panel.appendChild(header);
 
         const container = document.createElement('div');
         container.id = 'grab-log-container';
+        container.style.cssText = 'padding: 10px; max-height: 190px; overflow-y: auto;';
         panel.appendChild(container);
 
         document.body.appendChild(panel);
+        makeDraggable(panel);
+
         return container;
     }
 
@@ -75,11 +114,9 @@
     }
 
     function extractTrainNumber(text) {
-        // Extract number from "TRAIN NAME (827)" or just "827"
         if (!text) return '';
         const match = text.match(/\((\d+)\)/);
         if (match) return match[1];
-        // If text is just a number
         if (/^\d+$/.test(text.trim())) return text.trim();
         return '';
     }
@@ -93,13 +130,8 @@
 
     const delay = ms => new Promise(r => setTimeout(r, ms));
 
-    // ========================================================================
-    // NOTIFICATION
-    // ========================================================================
-
     function notify(msg, type = 'success') {
         log(`NOTIFY: ${msg}`, type === 'success' ? 'success' : type);
-
         const existing = document.querySelector('#auto-grab-notification');
         if (existing) existing.remove();
 
@@ -143,7 +175,7 @@
                     attempts++;
                     if (attempts >= 40) {
                         clearInterval(check);
-                        log('No buttons found after 20s', 'error');
+                        log('No buttons found', 'error');
                         resolve(false);
                     }
                 }
@@ -152,18 +184,13 @@
     }
 
     function findTrainSections() {
-        // Find all train sections on the page
-        // Each train section contains the train name with number like "RUPOSHI BANGLA EXPRESS (827)"
         const sections = [];
-
-        // Look for elements containing train number pattern
         const allElements = document.querySelectorAll('*');
         const processed = new Set();
 
         for (const el of allElements) {
             if (el.children.length > 0) continue;
 
-            // Look for train name pattern: WORDS (NUMBER)
             const text = el.textContent.trim();
             const match = text.match(/^([A-Z][A-Z\s]+)\s*\((\d+)\)$/);
 
@@ -171,10 +198,8 @@
                 const trainName = match[0];
                 const trainNumber = match[2];
 
-                // Find the section containing this train
                 let section = el.parentElement;
                 for (let i = 0; i < 12 && section; i++) {
-                    // Check if section has BOOK NOW buttons
                     const btns = section.querySelectorAll('button');
                     const hasBookNow = Array.from(btns).some(b =>
                         b.textContent.trim().toUpperCase() === 'BOOK NOW'
@@ -200,14 +225,13 @@
         return sections;
     }
 
-    function findTicketCardsInSection(section, targetClass) {
+    function findTicketCardsInSection(section) {
         const cards = [];
         const buttons = section.element.querySelectorAll('button');
 
         for (const btn of buttons) {
             if (btn.textContent.trim().toUpperCase() !== 'BOOK NOW') continue;
 
-            // Walk up to find the card containing class info
             let card = btn.parentElement;
             let className = '';
             let availCount = 0;
@@ -215,7 +239,6 @@
             for (let i = 0; i < 6 && card; i++) {
                 const text = card.textContent || '';
 
-                // Find class name
                 const classPatterns = ['AC_S', 'AC S', 'S_CHAIR', 'S CHAIR', 'SNIGDHA', 'SHOVAN', 'SHOVON', 'F_BERTH', 'F BERTH', 'SLPR'];
                 for (const pattern of classPatterns) {
                     if (text.toUpperCase().includes(pattern) && !className) {
@@ -223,7 +246,6 @@
                     }
                 }
 
-                // Find availability count
                 const availMatch = text.match(/Available\s*Tickets[^0-9]*(\d+)/i);
                 if (availMatch) {
                     availCount = parseInt(availMatch[1]);
@@ -251,12 +273,12 @@
     // ========================================================================
 
     async function autoGrabTicket() {
-        log('=== TICKET GRABBER v2.1 ===', 'success');
+        log('=== TICKET GRABBER v2.2 ===', 'success');
         log(`Target: Train#="${requestedTrainNumber}" Class="${requestedClass}"`);
 
         if (!requestedTrainNumber && !requestedTrain && !requestedClass) {
             log('No train/class specified', 'warn');
-            notify('No target specified. Select manually.', 'warning');
+            notify('No target specified', 'warning');
             return;
         }
 
@@ -268,16 +290,13 @@
 
         await delay(800);
 
-        // Find all train sections
         const trainSections = findTrainSections();
 
         if (trainSections.length === 0) {
-            log('No train sections found', 'error');
-            notify('No trains found on page!', 'error');
+            notify('No trains found!', 'error');
             return;
         }
 
-        // Find the matching train section by train NUMBER
         let targetSection = null;
 
         if (requestedTrainNumber) {
@@ -287,7 +306,6 @@
             }
         }
 
-        // Fallback: try to match by train name
         if (!targetSection && requestedTrain) {
             const reqNum = extractTrainNumber(requestedTrain);
             if (reqNum) {
@@ -298,49 +316,40 @@
                     s.trainName.toLowerCase().includes(requestedTrain.toLowerCase().substring(0, 15))
                 );
             }
-            if (targetSection) {
-                log(`Found train by name: ${targetSection.trainName}`, 'success');
-            }
         }
 
-        // If still no match, use first train
         if (!targetSection) {
             targetSection = trainSections[0];
             log(`Using first train: ${targetSection.trainName}`, 'warn');
             notify(`⚠️ Train not found. Using ${targetSection.trainName}`, 'warning');
         }
 
-        // Find ticket cards in this section
-        const cards = findTicketCardsInSection(targetSection, requestedClass);
-        log(`Found ${cards.length} ticket cards in ${targetSection.trainName}`);
+        const cards = findTicketCardsInSection(targetSection);
+        log(`Found ${cards.length} tickets in ${targetSection.trainName}`);
 
         if (cards.length === 0) {
             notify('No tickets in this train!', 'error');
             return;
         }
 
-        // Find matching class
         let selectedCard = null;
 
         if (requestedClass) {
             selectedCard = cards.find(c => classNamesMatch(c.className, requestedClass));
             if (selectedCard) {
-                log(`Found exact class: ${selectedCard.className}`, 'success');
+                log(`Found class: ${selectedCard.className}`, 'success');
             }
         }
 
-        // Fallback: first available
         if (!selectedCard) {
             selectedCard = cards.find(c => c.available > 0) || cards[0];
-            if (selectedCard && requestedClass) {
-                log(`Class ${requestedClass} not found, using ${selectedCard.className}`, 'warn');
+            if (requestedClass) {
                 notify(`⚠️ ${requestedClass} unavailable. Using ${selectedCard.className}`, 'warning');
             }
         }
 
-        // Click!
         if (selectedCard) {
-            notify(`✓ Selecting: ${targetSection.trainName} - ${selectedCard.className}`, 'success');
+            notify(`✓ ${targetSection.trainName} - ${selectedCard.className}`, 'success');
 
             if (selectedCard.card) {
                 selectedCard.card.style.boxShadow = '0 0 25px 8px #27ae60';
@@ -350,16 +359,10 @@
             selectedCard.button.scrollIntoView({ behavior: 'smooth', block: 'center' });
             await delay(400);
 
-            log(`Clicking BOOK NOW for ${selectedCard.className}`, 'success');
+            log(`Clicking BOOK NOW`, 'success');
             selectedCard.button.click();
-        } else {
-            notify('No matching ticket found!', 'error');
         }
     }
-
-    // ========================================================================
-    // INIT
-    // ========================================================================
 
     log('Script loaded');
 
