@@ -265,6 +265,11 @@
             });
         }
 
+        cards.forEach((c, idx) => {
+            log(`[Card ${idx}] detected class: "${c.className}" (Avail: ${c.available})`);
+            // log(`[Card ${idx}] Text: ${c.card ? c.card.textContent.substring(0, 50) + '...' : 'none'}`);
+        });
+
         return cards;
     }
 
