@@ -9,9 +9,38 @@
 <body>
     <div class="container">
         <h3>Train Ticket Tracker Sync</h3>
-        <button id="openAppBtn">Open Tracker App</button>
-        <button id="syncBtn">Sync Account</button>
-        <p id="status"></p>
+        
+        <div class="section">
+            <h4>🎯 Target Selection</h4>
+            <div class="input-group">
+                <label for="trainNumber">Train Number:</label>
+                <input type="text" id="trainNumber" placeholder="e.g. 827">
+            </div>
+            <div class="input-group">
+                <label for="trainClass">Class:</label>
+                <select id="trainClass">
+                    <option value="">Any</option>
+                    <option value="S_CHAIR">S Chair</option>
+                    <option value="SNIGDHA">Snigdha</option>
+                    <option value="AC_S">AC S</option>
+                    <option value="SHOVAN">Shovan</option>
+                    <option value="F_BERTH">F Berth</option>
+                    <option value="F_SEAT">F Seat</option>
+                    <option value="SLPR">Sleeper</option>
+                </select>
+            </div>
+            <button id="saveTargetBtn">💾 Save Target</button>
+            <p id="targetStatus"></p>
+        </div>
+
+        <hr>
+
+        <div class="section">
+            <h4>🔗 Account Sync</h4>
+            <button id="openAppBtn">Open Tracker App</button>
+            <button id="syncBtn">Sync Account</button>
+            <p id="status"></p>
+        </div>
     </div>
 
     <script src="popup.js"></script>

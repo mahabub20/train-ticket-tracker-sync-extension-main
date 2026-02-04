@@ -1,5 +1,5 @@
 // Auto-grab ticket content script
-// Version 2.3 - Better URL param handling + train number extraction
+// Version 3.0 - Uses Chrome storage for target selection
 // Runs on: https://eticket.railway.gov.bd/booking/train/search*
 
 (function () {
@@ -10,29 +10,6 @@
         return;
     }
     window.__autoGrabInitialized = true;
-
-    // Get ALL URL parameters
-    const urlParams = new URLSearchParams(window.location.search);
-    const requestedClass = urlParams.get('class');
-    const requestedTrain = urlParams.get('train');
-    const requestedTrainNumber = urlParams.get('train_number');
-
-    // Also try to extract train number from train name like "RUPOSHI BANGLA EXPRESS (827)"
-    let trainNumberFromName = '';
-    if (requestedTrain) {
-        const match = requestedTrain.match(/\((\d+)\)/);
-        if (match) trainNumberFromName = match[1];
-    }
-
-    const effectiveTrainNumber = requestedTrainNumber || trainNumberFromName;
-
-    console.log('[Auto-Grab] Full URL:', window.location.href);
-    console.log('[Auto-Grab] Params:', {
-        train: requestedTrain,
-        trainNumber: requestedTrainNumber,
-        extractedNumber: trainNumberFromName,
-        class: requestedClass
-    });
 
     // ========================================================================
     // DRAGGABLE DEBUG PANEL
@@ -92,7 +69,7 @@
             border-bottom: 1px solid #334; user-select: none;
             display: flex; justify-content: space-between; align-items: center;
         `;
-        header.innerHTML = '<span>🎫 Ticket Grabber v2.3</span><span style="color:#666;font-size:10px;">⠿ drag</span>';
+        header.innerHTML = '<span>🎫 Ticket Grabber v3.0 (Storage)</span><span style="color:#666;font-size:10px;">⠿ drag</span>';
         panel.appendChild(header);
 
         const container = document.createElement('div');
@@ -282,14 +259,43 @@
     // ========================================================================
 
     async function autoGrabTicket() {
-        log('=== TICKET GRABBER v2.3 ===', 'success');
-        log(`URL params: train="${requestedTrain}" train_number="${requestedTrainNumber}" class="${requestedClass}"`);
-        log(`Effective train#: "${effectiveTrainNumber}"`);
+        log('=== TICKET GRABBER v3.0 (Storage) ===', 'success');
 
-        if (!effectiveTrainNumber && !requestedTrain && !requestedClass) {
-            log('No train/class specified in URL', 'warn');
-            notify('No target specified in URL', 'warning');
-            return;
+        // Read target from Chrome storage
+        let targetTrainNumber = '';
+        let targetTrainClass = '';
+
+        try {
+            const result = await chrome.storage.local.get(['targetTrainNumber', 'targetTrainClass']);
+            targetTrainNumber = result.targetTrainNumber || '';
+            targetTrainClass = result.targetTrainClass || '';
+            log(`From storage: Train#="${targetTrainNumber}" Class="${targetTrainClass}"`);
+        } catch (e) {
+            log('Could not read from storage: ' + e.message, 'warn');
+        }
+
+        // Also check URL params as fallback
+        const urlParams = new URLSearchParams(window.location.search);
+        const urlClass = urlParams.get('class');
+        const urlTrain = urlParams.get('train');
+        const urlTrainNumber = urlParams.get('train_number');
+
+        // Extract train number from URL train name if present
+        let urlExtractedNumber = '';
+        if (urlTrain) {
+            const match = urlTrain.match(/\((\d+)\)/);
+            if (match) urlExtractedNumber = match[1];
+        }
+
+        // Priority: Storage > URL train_number > URL extracted > none
+        const effectiveTrainNumber = targetTrainNumber || urlTrainNumber || urlExtractedNumber;
+        const effectiveClass = targetTrainClass || urlClass;
+
+        log(`Effective: Train#="${effectiveTrainNumber}" Class="${effectiveClass}"`);
+
+        if (!effectiveTrainNumber && !effectiveClass) {
+            log('No target set. Open extension popup to set target!', 'warn');
+            notify('⚠️ Set target train in extension popup first!', 'warning');
         }
 
         const loaded = await waitForTrainCards();
@@ -311,33 +317,22 @@
         let targetSection = null;
 
         if (effectiveTrainNumber) {
-            log(`Searching for train number: ${effectiveTrainNumber}`);
+            log(`Searching for train #${effectiveTrainNumber}...`);
             targetSection = trainSections.find(s => s.trainNumber === effectiveTrainNumber);
             if (targetSection) {
-                log(`✓ FOUND by train number: ${targetSection.trainName}`, 'success');
+                log(`✓ FOUND: ${targetSection.trainName}`, 'success');
             } else {
-                log(`✗ Train #${effectiveTrainNumber} NOT found on this page`, 'warn');
+                log(`✗ Train #${effectiveTrainNumber} NOT on this page`, 'warn');
             }
         }
 
-        // Fallback: try partial name match
-        if (!targetSection && requestedTrain) {
-            log(`Trying name match for: ${requestedTrain}`);
-            const searchName = requestedTrain.replace(/\s*\(\d+\)\s*/, '').toLowerCase().trim();
-            targetSection = trainSections.find(s => {
-                const sectionName = s.trainName.replace(/\s*\(\d+\)\s*/, '').toLowerCase().trim();
-                return sectionName.includes(searchName) || searchName.includes(sectionName);
-            });
-            if (targetSection) {
-                log(`Found by name: ${targetSection.trainName}`, 'success');
-            }
-        }
-
-        // Final fallback
+        // Fallback to first train
         if (!targetSection) {
             targetSection = trainSections[0];
-            log(`Using first train: ${targetSection.trainName}`, 'warn');
-            notify(`⚠ Train ${effectiveTrainNumber || requestedTrain} not found. Using ${targetSection.trainName}`, 'warning');
+            log(`Using first available: ${targetSection.trainName}`, 'warn');
+            if (effectiveTrainNumber) {
+                notify(`⚠️ Train #${effectiveTrainNumber} not found. Using ${targetSection.trainName}`, 'warning');
+            }
         }
 
         const cards = findTicketCardsInSection(targetSection);
@@ -351,21 +346,21 @@
         // Find matching class
         let selectedCard = null;
 
-        if (requestedClass) {
-            log(`Searching for class: ${requestedClass}`);
-            selectedCard = cards.find(c => classNamesMatch(c.className, requestedClass));
+        if (effectiveClass) {
+            log(`Searching for class: ${effectiveClass}...`);
+            selectedCard = cards.find(c => classNamesMatch(c.className, effectiveClass));
             if (selectedCard) {
                 log(`✓ FOUND class: ${selectedCard.className}`, 'success');
             } else {
-                log(`✗ Class ${requestedClass} not found`, 'warn');
+                log(`✗ Class ${effectiveClass} not available`, 'warn');
             }
         }
 
         // Fallback to first available
         if (!selectedCard) {
             selectedCard = cards.find(c => c.available > 0) || cards[0];
-            if (requestedClass) {
-                notify(`⚠ ${requestedClass} unavailable. Using ${selectedCard.className}`, 'warning');
+            if (effectiveClass) {
+                notify(`⚠️ ${effectiveClass} unavailable. Using ${selectedCard.className}`, 'warning');
             }
         }
 
@@ -387,7 +382,6 @@
     }
 
     log('Script loaded');
-    log(`Full URL: ${window.location.href.substring(0, 100)}...`);
 
     if (document.readyState === 'complete') {
         setTimeout(autoGrabTicket, 1500);

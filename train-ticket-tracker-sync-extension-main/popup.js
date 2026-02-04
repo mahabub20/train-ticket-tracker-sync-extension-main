@@ -1,8 +1,55 @@
-// Open Tracker App button - opens the login page directly
+// Train Ticket Tracker Sync - Popup JS
+
+// Load saved target on popup open
+document.addEventListener('DOMContentLoaded', async () => {
+    const result = await chrome.storage.local.get(['targetTrainNumber', 'targetTrainClass']);
+    if (result.targetTrainNumber) {
+        document.getElementById('trainNumber').value = result.targetTrainNumber;
+    }
+    if (result.targetTrainClass) {
+        document.getElementById('trainClass').value = result.targetTrainClass;
+    }
+
+    // Show current target
+    updateTargetStatus(result.targetTrainNumber, result.targetTrainClass);
+});
+
+function updateTargetStatus(trainNum, trainClass) {
+    const statusEl = document.getElementById('targetStatus');
+    if (trainNum || trainClass) {
+        statusEl.textContent = `Current: Train #${trainNum || 'Any'} - ${trainClass || 'Any class'}`;
+        statusEl.style.color = '#0f0';
+    } else {
+        statusEl.textContent = 'No target set (will select first available)';
+        statusEl.style.color = '#ff0';
+    }
+}
+
+// Save target button
+document.getElementById('saveTargetBtn').addEventListener('click', async () => {
+    const trainNumber = document.getElementById('trainNumber').value.trim();
+    const trainClass = document.getElementById('trainClass').value;
+
+    await chrome.storage.local.set({
+        targetTrainNumber: trainNumber,
+        targetTrainClass: trainClass
+    });
+
+    updateTargetStatus(trainNumber, trainClass);
+
+    const statusEl = document.getElementById('targetStatus');
+    statusEl.textContent = '✓ Target saved!';
+    statusEl.style.color = '#0f0';
+
+    setTimeout(() => updateTargetStatus(trainNumber, trainClass), 2000);
+});
+
+// Open Tracker App button
 document.getElementById("openAppBtn").addEventListener("click", () => {
     chrome.tabs.create({ url: "https://train-ticket-notifier.vercel.app/login" });
 });
 
+// Sync Account button
 document.getElementById("syncBtn").addEventListener("click", async () => {
     const statusEl = document.getElementById("status");
     statusEl.textContent = "Syncing...";
@@ -55,7 +102,7 @@ document.getElementById("syncBtn").addEventListener("click", async () => {
             return;
         }
 
-        // Get token from extension storage first (Synchronous relative to injection)
+        // Get token from extension storage
         const result = await chrome.storage.local.get([
             "bdTrainToken",
             "bdTrainSSDK",
@@ -71,7 +118,7 @@ document.getElementById("syncBtn").addEventListener("click", async () => {
             return;
         }
 
-        // Inject and Reload in one go
+        // Inject and Reload
         await chrome.scripting.executeScript({
             target: { tabId: trackerTab.id },
             args: [token, ssdk, uudid],
@@ -86,7 +133,7 @@ document.getElementById("syncBtn").addEventListener("click", async () => {
             },
         });
 
-        // Force reload the tracker tab with cache bypass
+        // Force reload
         await chrome.tabs.reload(trackerTab.id, { bypassCache: true });
 
         statusEl.textContent = "Account synced successfully!";
